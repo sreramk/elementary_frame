@@ -9,8 +9,6 @@ import collections
 
 from utils import RandomDict
 
-import re
-
 
 class ImageDSManage:
     """
@@ -34,7 +32,6 @@ class ImageDSManage:
         self.__buffer_priority = buffer_priority
 
         for s in self.__dir_list:
-            # print(s)
             temp_dirs = list(os.listdir(s))
 
             for i in range(len(temp_dirs)):
@@ -42,16 +39,11 @@ class ImageDSManage:
 
             new_dirs = []
 
-            # print (temp_dirs)
-
             for strings in temp_dirs:
-                # print (strings[len(strings)-4:])
                 for extInst in self.__accepted_ext:
                     if extInst in strings[len(strings) - len(extInst):]:
                         new_dirs.append(strings)
-            # print(new_dirs)
             self.__image_dir_list.extend(list(new_dirs))
-        # print (self.__image_dir_list)
 
     def get_image_dir_list(self):
         return self.__image_dir_list.copy()
@@ -96,25 +88,6 @@ class ImageDSManage:
             self.__image_buffer_dict[directory] = result
             return result
 
-    def __load_image_low(self, directory):
-        """
-        Does not consider the size parameters in defining the directory. This performs retrieval
-        based on the raw key.
-        :param directory:
-        :return:
-        """
-        result = self.__retrieve_img_cache(directory)
-
-        if result is not None:
-            return result
-
-        new_img = cv2.imread(directory)
-        new_img = numpy.float32(new_img) / 255.0
-
-        self.__cache_image(directory=directory, img=new_img)
-
-        return new_img
-
     @staticmethod
     def __size_embedded_directory(directory, min_x_f=None, min_y_f=None):
         size_directory = None
@@ -132,7 +105,7 @@ class ImageDSManage:
                             "simultaneously assigned")
         return size_directory if size_directory is not None else directory
 
-    def __load_image(self, directory, min_x_f=None, min_y_f=None):
+    def __load_image(self, directory):
 
         """
         Performs a cached load, to reduce the number of file accesses. The number of
@@ -141,27 +114,13 @@ class ImageDSManage:
         :return:
         """
 
-        # directory = re.sub(r" ?\([^)]+\)", "", directory)
-
-        # print(directory)
-
-        # size_directory = ImageDSManage.__size_embedded_directory(directory, min_x_f, min_y_f)
-        # result = self.__retrieve_img_cache(size_directory)
-
         result = self.__retrieve_img_cache(directory)
 
         if result is not None:
             return result
 
-        # if result is not None:
-        #    result = ImageDSManage.__random_crop(result, min_x_f, min_y_f)
-        #    return result[2]
-
         new_img = cv2.imread(directory)
         new_img = numpy.float32(new_img) / 255.0
-
-        if min_x_f is not None and min_y_f is not None:
-            new_img = ImageDSManage.__random_crop(new_img, min_x_f, min_y_f)[2]
 
         self.__cache_image(directory=directory, img=new_img)
 
@@ -213,7 +172,6 @@ class ImageDSManage:
 
         if rand_choose_buf > rand_choose_ds and len(self.__rand_directories) > 0:
             rand_dir = self.__rand_directories.random_key()
-            # rand_dir = re.sub(r" ?\([^)]+\)", "", rand_dir)
         else:
             rand_dir = random.choice(self.__image_dir_list)
 
@@ -231,17 +189,13 @@ class ImageDSManage:
 
         for i in range(batch_size):
 
-            original_img = self.__load_image(self.__choose_dir(), min_x_f, min_y_f)
+            original_img = self.__load_image(self.__choose_dir())
 
             # reducing the information contained in the image
 
             down_sampled = cv2.resize(original_img,
                                       dsize=(int(len(original_img[0]) / down_sample_factor),
                                              int(len(original_img) / down_sample_factor)))
-
-            # cv2.imshow("original", original_img)
-            # cv2.imshow("down", down_sampled)
-            # cv2.waitKey(0)
 
             down_sampled = cv2.resize(down_sampled,
                                       dsize=(len(original_img[0]),
@@ -265,7 +219,6 @@ class ImageDSManage:
         for i in range(batch_size):
             pos_x, pos_y, batch_down_sampled[i] = ImageDSManage.__random_crop(batch_down_sampled[i], min_x, min_y)
             batch_original[i] = ImageDSManage.__crop_img(batch_original[i], min_x, min_y, pos_x, pos_y)
-            # pos_x, pos_y, batch_original[i] = ImageDSManage.__random_crop(batch_original[i], min_x, min_y, pos_x, pos_y)
 
         return min_x, min_y, batch_down_sampled, batch_original
 

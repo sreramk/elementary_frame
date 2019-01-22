@@ -15,9 +15,8 @@ def log10(x):
 
 
 class SRNetworkManager:
-
-    RMS_ERROR   = "RMS_ERROR"
-    PSNR_ERROR  = "PSNR_ERROR"
+    RMS_ERROR = "RMS_ERROR"
+    PSNR_ERROR = "PSNR_ERROR"
     INPUT_LEARNER_MARGIN = "INPUT_LEARNER_MARGIN"
 
     def __init__(self, image_manager, filters_arch, bias_arch, strides_arch,
@@ -47,31 +46,32 @@ class SRNetworkManager:
 
         with tf.device(self.__device):
             self.__network_input = tf.placeholder(dtype=tf.float32, shape=[None, None, None, None],
-                                                  name=name + "_input")
+                                                  name=self.__name + "_input")
             self.__network_expected_out = tf.placeholder(dtype=tf.float32, shape=[None, None, None, None],
-                                                         name=name + "_expected_out")
+                                                         name=self.__name + "_expected_out")
 
         if self.__param_path is not None:
             self.__saver = tf.train.Saver()
         else:
             self.__saver = None
 
-        self.__construct_network()
-
-    def __construct_network(self):
+    def construct_network(self, filter_list):
         with tf.device(self.__device):
-            if self.__param_path is None:
+            if self.__param_path is None and filter_list is None:
                 for i in range(len(self.__filters_arch)):
                     self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=self.__filters_arch[i]),
                                                       name=self.__name + "_W_" + str(i)))
                     self.__biases.append(tf.Variable(initial_value=tf.truncated_normal(shape=self.__bias_arch[i]),
                                                      name=self.__name + "_B_" + str(i)))
-            else:
+            elif filter_list is None:
                 for i in range(len(self.__filters_arch)):
                     self.__filters.append(tf.get_variable(name=self.__name + "_W_" + str(i),
                                                           shape=self.__filters_arch[i]))
                     self.__biases.append(tf.get_variable(name=self.__name + "_B_" + str(i),
                                                          shape=self.__bias_arch[i]))
+
+            else:
+                self.__filters = filter_list
 
             cur_layer = tf.nn.conv2d(input=self.__network_input, filter=self.__filters[0],
                                      strides=self.__strides_arch[0], padding=self.__padding)
@@ -97,29 +97,99 @@ class SRNetworkManager:
             raise Exception("Error: parameter path not declared")
 
     def get_network_output(self):
-        return self.__conv_layers[len(self.__conv_layers)-1]
+        return self.__conv_layers[len(self.__conv_layers) - 1]
 
-    #def set_rms_network_loss(self):
+    def get_last_layer(self):
+        return self.__conv_layers[len(self.__conv_layers) - 1]
 
+    def set_rms_network_loss(self):
+        if SRNetworkManager.RMS_ERROR not in self.__loss_network:
+            reduce_rms_loss = tf.reduce_mean(
+                tf.square(
+                    tf.subtract(self.get_last_layer(), self.__network_expected_out)))
+            self.__loss_network[SRNetworkManager.RMS_ERROR] = reduce_rms_loss
+            return True
+        return False
+
+    def get_rms_network_loss(self):
+        if SRNetworkManager.RMS_ERROR not in self.__loss_network:
+            self.set_rms_network_loss()
+        return self.__loss_network[SRNetworkManager.RMS_ERROR]
+
+    def set_psnr_network_loss(self):
+
+        if SRNetworkManager.PSNR_ERROR not in self.__loss_network:
+            rms_error_loss = self.get_rms_network_loss()
+            reduce_psnr_loss = log10(tf.divide(1, rms_error_loss))
+            reduce_psnr_loss = tf.multiply(-20.0, reduce_psnr_loss)
+            self.__network_input[SRNetworkManager.PSNR_ERROR] = reduce_psnr_loss
+            return True
+        return False
+
+    def get_psnr_network_loss(self):
+        if SRNetworkManager.PSNR_ERROR not in self.__loss_network:
+            self.set_psnr_network_loss()
+        return self.__loss_network[SRNetworkManager.PSNR_ERROR]
+
+    def set_input_learner_margin(self, error_loss_flag=PSNR_ERROR):
+        if error_loss_flag == SRNetworkManager.PSNR_ERROR:
+            error_loss = self.get_psnr_network_loss()
+        elif error_loss_flag == SRNetworkManager.RMS_ERROR:
+            error_loss = self.get_rms_network_loss()
+        else:
+            return False
+
+        CURRENT_FLAG = SRNetworkManager.INPUT_LEARNER_MARGIN + "_" + error_loss_flag
+
+        if CURRENT_FLAG not in self.__loss_network:
+            prevent_learning_input = tf.abs(tf.subtract(self.__network_expected_out, self.__network_input))
+            prevent_learning_input = tf.subtract(prevent_learning_input,
+                                                 tf.abs(tf.subtract(self.get_last_layer(), self.__network_input)))
+            prevent_learning_input = tf.reduce_mean(tf.square(prevent_learning_input))
+
+            error_loss = tf.add(error_loss, prevent_learning_input)
+
+            self.__loss_network[CURRENT_FLAG] = error_loss
+            return True
+
+        return False
+
+    def get_input_learner_margin(self, error_loss_flag=PSNR_ERROR):
+        CURRENT_FLAG = SRNetworkManager.INPUT_LEARNER_MARGIN + "_" + error_loss_flag
+
+        if CURRENT_FLAG not in self.__loss_network:
+            if self.set_input_learner_margin(error_loss_flag):
+                cur_loss = self.__loss_network[CURRENT_FLAG]
+                return cur_loss
+            else:
+                return None
+
+        return self.__loss_network[CURRENT_FLAG]
+
+    def get_input(self):
+        return self.__network_input
+
+    def get_expected_out(self):
+        return self.__network_expected_out
 
 
 if __name__ == "__main__":
     for device in ['/gpu:0']:
         with tf.device(device):
             img_manager = ImageDSManage(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
-                                        image_buffer_limit=30)
+                                        image_buffer_limit=100)
 
             W_x = tf.Variable(initial_value=tf.truncated_normal(shape=[400, 400, 3]))
 
-            w_1 = tf.Variable(initial_value=tf.truncated_normal(shape=[10, 10, 3, 10]))
+            w_1 = tf.Variable(initial_value=tf.truncated_normal(shape=[10, 10, 3, 20]))
 
-            b_1 = tf.Variable(initial_value=tf.truncated_normal(shape=[10]))
+            b_1 = tf.Variable(initial_value=tf.truncated_normal(shape=[20]))
 
-            w_2 = tf.Variable(initial_value=tf.truncated_normal(shape=[2, 2, 10, 10]))
+            w_2 = tf.Variable(initial_value=tf.truncated_normal(shape=[2, 2, 20, 40]))
 
-            b_2 = tf.Variable(initial_value=tf.truncated_normal(shape=[10]))
+            b_2 = tf.Variable(initial_value=tf.truncated_normal(shape=[40]))
 
-            w_3 = tf.Variable(initial_value=tf.truncated_normal(shape=[2, 2, 10, 2]))
+            w_3 = tf.Variable(initial_value=tf.truncated_normal(shape=[2, 2, 40, 2]))
 
             b_3 = tf.Variable(initial_value=tf.truncated_normal(shape=[2]))
 
@@ -127,7 +197,7 @@ if __name__ == "__main__":
 
             b_4 = tf.Variable(initial_value=tf.truncated_normal(shape=[2]))
 
-            w_5 = tf.Variable(initial_value=tf.truncated_normal(shape=[10, 10, 10, 3]))
+            w_5 = tf.Variable(initial_value=tf.truncated_normal(shape=[10, 10, 40, 3]))
 
             b_5 = tf.Variable(initial_value=tf.truncated_normal(shape=[3]))
 
@@ -182,7 +252,7 @@ if __name__ == "__main__":
 
             prevent_learning_input = tf.abs(tf.subtract(expected_output, input_data))
             prevent_learning_input = tf.subtract(prevent_learning_input, tf.abs(tf.subtract(network, input_data)))
-            prevent_learning_input = tf.reduce_mean(tf.square(prevent_learning_input))
+            prevent_learning_input = tf.exp(tf.reduce_mean(tf.square(prevent_learning_input)))
 
             reduce_mean_loss = tf.reduce_mean(tf.square(tf.subtract(network, expected_output)))
 
@@ -224,10 +294,10 @@ if __name__ == "__main__":
 
                 print("Count: " + str(j))
 
-                min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
+                min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1,
                                                                                          down_sample_factor=4,
-                                                                                         min_x_f=70,
-                                                                                         min_y_f=70)
+                                                                                         min_x_f=400,
+                                                                                         min_y_f=400)
 
                 # for i in range(len(batch_original)):
                 #    batch_original[i] = cv2.resize(batch_original[i], dsize=(52, 52))
@@ -236,7 +306,7 @@ if __name__ == "__main__":
 
                 # batch_down_sampled.fill(1.0)
 
-                for i in range(10000):
+                for i in range(1000):
                     # for j in range(10):
 
                     minimize, loss = sess.run(fetches=[adam_minimize, network_loss],
@@ -247,6 +317,7 @@ if __name__ == "__main__":
                     print("epoch :" + str(i))
                     print("loss: " + str(loss))
 
+                """
                 for i in range(6):
                     # min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1, down_sample_factor=10,
                     #                                                                     min_x_f=400, min_y_f=400 )
@@ -265,7 +336,7 @@ if __name__ == "__main__":
                     cv2.imshow("down_sampled" + str(i) + "_" + str(j), batch_down_sampled[i])
                     cv2.imshow("computed" + str(i) + "_" + str(j), computed_image[0][i])
                 cv2.waitKey(0)
-
+                """
                 computed_image = None
 
                 for i in range(5):
@@ -273,19 +344,18 @@ if __name__ == "__main__":
                                                                                              down_sample_factor=4,
                                                                                              min_x_f=400, min_y_f=400)
 
+                    down_sampled = batch_down_sampled[0]
                     # batch_down_sampled = 1 - np.asarray(batch_down_sampled)
 
                     # if computed_image != None:
                     #    batch_down_sampled[0] = computed_image[0][0]
 
-                    for x in range(10):
-
+                    for x in range(1):
                         computed_image = sess.run(fetches=[network], feed_dict={input_data: batch_down_sampled,
-                                                                            min_x_t: min_x,
-                                                                            min_y_t: min_y})
+                                                                                min_x_t: min_x,
+                                                                                min_y_t: min_y})
 
-                        batch_down_sampled[0] = computed_image
-
+                        batch_down_sampled[0] = computed_image[0][0]
 
                     """
                     print (len(computed_image))
@@ -296,7 +366,7 @@ if __name__ == "__main__":
                     """
 
                     cv2.imshow("2original" + str(i) + "_" + str(j), batch_original[0])
-                    cv2.imshow("2down_sampled" + str(i) + "_" + str(j), batch_down_sampled[0])
+                    cv2.imshow("2down_sampled" + str(i) + "_" + str(j), down_sampled)
                     cv2.imshow("2computed" + str(i) + "_" + str(j), computed_image[0][0])
 
                 cv2.waitKey(0)
