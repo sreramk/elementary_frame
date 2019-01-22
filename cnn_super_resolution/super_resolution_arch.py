@@ -278,9 +278,14 @@ if __name__ == "__main__":
                     # if computed_image != None:
                     #    batch_down_sampled[0] = computed_image[0][0]
 
-                    computed_image = sess.run(fetches=[network], feed_dict={input_data: batch_down_sampled,
+                    for x in range(10):
+
+                        computed_image = sess.run(fetches=[network], feed_dict={input_data: batch_down_sampled,
                                                                             min_x_t: min_x,
                                                                             min_y_t: min_y})
+
+                        batch_down_sampled[0] = computed_image
+
 
                     """
                     print (len(computed_image))
