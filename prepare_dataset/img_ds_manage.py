@@ -1,3 +1,5 @@
+# Copyright (c) 2019 K Sreram, All rights reserved
+
 import numpy
 import os
 import random
