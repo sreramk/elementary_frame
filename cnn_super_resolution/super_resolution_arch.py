@@ -51,6 +51,9 @@ class SRNetworkManager:
             self.__network_expected_out = tf.placeholder(dtype=tf.float32, shape=[None, None, None, None],
                                                          name=self.__name + "_expected_out")
 
+        self.__saver = None
+
+    def initialize_saver(self):
         self.__saver = tf.train.Saver()
 
     def is_filter_construct_ready(self):
@@ -87,7 +90,7 @@ class SRNetworkManager:
     def set_padding(self, padding):
         self.__padding = padding
 
-    def construct_filters(self, create_network_flag, device=None, filter_list=None):
+    def construct_filters(self, create_network_flag, device=None, filter_list=None, filter_subset=None):
         """
 
         :param create_network_flag: says if the network is being created or simply retrieved.
@@ -95,25 +98,36 @@ class SRNetworkManager:
         :param filter_list:
         :return:
         """
+
+        # print ("hit!")
         self.init_device_name(device)
 
         if not self.is_filter_construct_ready():
+            # print ("hit")
             return False
 
         with tf.device(self.get_device_name()):
+            if filter_subset is None:
+                filter_subset = range(1, len(self.__filters_arch))
             if create_network_flag is True:
-                for i in range(len(self.__filters_arch)):
+                for i in filter_subset:
+                    # print (self.__filters_arch[i])
+                    # print ("Hit 1")
+
                     self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=self.__filters_arch[i]),
                                                       name=self.__name + "_W_" + str(i)))
                     self.__biases.append(tf.Variable(initial_value=tf.truncated_normal(shape=self.__bias_arch[i]),
                                                      name=self.__name + "_B_" + str(i)))
             elif filter_list is None:
-                for i in range(len(self.__filters_arch)):
+                for i in filter_subset:
+                    # print ("hit 2")
+                    # print (self.__filters_arch[i])
                     self.__filters.append(tf.get_variable(name=self.__name + "_W_" + str(i),
                                                           shape=self.__filters_arch[i]))
                     self.__biases.append(tf.get_variable(name=self.__name + "_B_" + str(i),
                                                          shape=self.__bias_arch[i]))
             else:
+                print ("hit 3")
                 self.__filters = filter_list
 
         return True
@@ -174,13 +188,14 @@ class SRNetworkManager:
         return os.path.isfile(self.__param_path)
 
     def restore_prams(self, session):
-        if self.check_if_file_exists():
+        if self.check_if_file_exists() and self.__saver is not None:
             self.__saver.restore(session, self.__param_path)
             return True
         return False
 
     def save_prams(self, session):
-        self.__saver.save(session, self.__param_path)
+        if self.__saver is not None:
+            self.__saver.save(session, self.__param_path)
 
     def get_network_output(self):
         return self.__conv_layers[len(self.__conv_layers) - 1]
@@ -208,7 +223,7 @@ class SRNetworkManager:
             rms_error_loss = self.get_rms_network_loss(deep_reset, deep_reset)
             reduce_psnr_loss = log10(tf.divide(1, rms_error_loss))
             reduce_psnr_loss = tf.multiply(-20.0, reduce_psnr_loss)
-            self.__network_input[SRNetworkManager.PSNR_ERROR] = reduce_psnr_loss
+            self.__loss_network[SRNetworkManager.PSNR_ERROR] = reduce_psnr_loss
             return True
         return False
 
@@ -316,8 +331,7 @@ if __name__ == "__main__":
 
     network_manager.init_device_name('/gpu:0')
 
-    network_manager.construct_filters(create_network_flag=network_manager.check_if_file_exists(),
-                                      filter_list=filter_arch)
+    network_manager.construct_filters(create_network_flag=network_manager.check_if_file_exists())
 
     network_manager.construct_layers()
 
