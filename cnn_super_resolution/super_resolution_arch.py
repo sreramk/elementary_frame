@@ -1,5 +1,5 @@
 # Copyright (c) 2019 K Sreram, All rights reserved
-
+import cv2
 import os
 
 import tensorflow as tf
@@ -16,7 +16,7 @@ def log10(x):
 class SRNetworkManager:
     RMS_ERROR = "RMS_ERROR"
     PSNR_ERROR = "PSNR_ERROR"
-    INPUT_LEARNER_MARGIN = "INPUT_LEARNER_MARGIN"
+    TRANSFORM_RESTRAIN_ERROR = "INPUT_LEARNER_MARGIN"
 
     def __init__(self, name, param_path,
                  filters_arch=None, bias_arch=None, strides_arch=None,
@@ -132,13 +132,14 @@ class SRNetworkManager:
 
         return True
 
-    def construct_layers(self, device=None, add_input_layer=True, filter_subset=None):
+    def construct_layers(self, device=None, add_input_layer=True, force_valid_output_range=True, filter_subset=None):
         """
         Constructs convolution layers. Can be called multiple times, to extend the size
         of the network. But in case it is done, `add_input_layer` must be set to `False`
         for all the following calls. `filter_subset` can be used to directly assign a
         set of already constructed filters. This is allowed to help the system construct
         multiple architectures with the same set of filters.
+        :param force_valid_output_range:
         :param device:
         :param add_input_layer:
         :param filter_subset:
@@ -154,6 +155,7 @@ class SRNetworkManager:
                 cur_layer = tf.nn.conv2d(input=self.__network_input, filter=self.__filters[0],
                                          strides=self.__strides_arch[0], padding=self.__padding)
                 cur_layer = tf.add(cur_layer, self.__biases[0])
+                cur_layer = tf.nn.relu(cur_layer)
                 self.__conv_layers.append(cur_layer)
             else:
                 cur_layer = self.__conv_layers[len(self.__conv_layers) - 1]
@@ -165,7 +167,13 @@ class SRNetworkManager:
                 cur_layer = tf.nn.conv2d(input=cur_layer, filter=self.__filters[i],
                                          strides=self.__strides_arch[i], padding=self.__padding)
                 cur_layer = tf.add(cur_layer, self.__biases[i])
+                cur_layer = tf.nn.relu(cur_layer)
                 self.__conv_layers.append(cur_layer)
+            if force_valid_output_range:
+                output_element = self.__conv_layers[len(self.__conv_layers) -1]
+                output_element = tf.divide(output_element, tf.reduce_max(output_element))
+                self.__conv_layers.pop()
+                self.__conv_layers.append(output_element)
 
         return True
 
@@ -240,9 +248,9 @@ class SRNetworkManager:
         else:
             return False
 
-        CURRENT_FLAG = SRNetworkManager.INPUT_LEARNER_MARGIN + "_" + error_loss_flag
+        current_flag = SRNetworkManager.TRANSFORM_RESTRAIN_ERROR + "_" + error_loss_flag
 
-        if CURRENT_FLAG not in self.__loss_network or reset or deep_reset:
+        if current_flag not in self.__loss_network or reset or deep_reset:
             prevent_learning_input = tf.abs(tf.subtract(self.__network_expected_out, self.__network_input))
             prevent_learning_input = tf.subtract(prevent_learning_input,
                                                  tf.abs(tf.subtract(self.get_last_layer(), self.__network_input)))
@@ -250,22 +258,22 @@ class SRNetworkManager:
 
             error_loss = tf.add(error_loss, prevent_learning_input)
 
-            self.__loss_network[CURRENT_FLAG] = error_loss
+            self.__loss_network[current_flag] = error_loss
             return True
 
         return False
 
-    def get_input_learner_margin(self, error_loss_flag=PSNR_ERROR, reset=False, deep_reset=False):
-        CURRENT_FLAG = SRNetworkManager.INPUT_LEARNER_MARGIN + "_" + error_loss_flag
+    def get_input_transform_restrain_loss(self, error_loss_flag=PSNR_ERROR, reset=False, deep_reset=False):
+        current_flag = SRNetworkManager.TRANSFORM_RESTRAIN_ERROR + "_" + error_loss_flag
 
-        if CURRENT_FLAG not in self.__loss_network or reset or deep_reset:
+        if current_flag not in self.__loss_network or reset or deep_reset:
             if self.set_input_learner_margin(error_loss_flag, deep_reset, deep_reset):
-                cur_loss = self.__loss_network[CURRENT_FLAG]
+                cur_loss = self.__loss_network[current_flag]
                 return cur_loss
             else:
                 return None
 
-        return self.__loss_network[CURRENT_FLAG]
+        return self.__loss_network[current_flag]
 
     def get_input(self):
         return self.__network_input
@@ -314,15 +322,15 @@ if __name__ == "__main__":
     network_manager.set_strides_arch(SRNetworkManager.generate_strides_one(3))
 
     filter_arch = [
-        [10, 10, 3, 10],
-        [2, 2, 10, 10],
+        [10, 10, 10, 3],
+        [2, 2, 3, 10],
         [10, 10, 10, 3]
     ]
 
     network_manager.set_filter_arch(filter_arch)
 
     bias_arch = [
-        [10], [10], [3]
+        [3], [10], [3]
     ]
 
     network_manager.set_bias_arch(bias_arch)
@@ -335,9 +343,86 @@ if __name__ == "__main__":
 
     network_manager.construct_layers()
 
-    network_loss = network_manager.get_input_learner_margin()
+    network_loss = network_manager.get_input_transform_restrain_loss()
 
     adam_optimizer = network_manager.get_adam_loss_optimizer(network_loss)
 
     with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
-        pass
+        init = tf.initialize_all_variables()
+
+        sess.run(init)
+
+        sess.graph.finalize()
+
+        for j in range(100):
+
+            print("Count: " + str(j))
+
+            min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
+                                                                                     down_sample_factor=4,
+                                                                                     min_x_f=70,
+                                                                                     min_y_f=70)
+
+            # for i in range(len(batch_original)):
+            #    batch_original[i] = cv2.resize(batch_original[i], dsize=(52, 52))
+
+            # batch_down_sampled = np.asarray(batch_down_sampled)
+
+            # batch_down_sampled.fill(1.0)
+
+            for i in range(10000):
+                # for j in range(10):
+
+                minimize, loss = sess.run(fetches=[adam_optimizer, network_loss],
+                                          feed_dict={network_manager.get_input(): batch_down_sampled,
+                                                     network_manager.get_expected_out(): batch_original,
+                                                  })
+                print("epoch :" + str(i))
+                print("loss: " + str(loss))
+
+            for i in range(6):
+                # min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1, down_sample_factor=10,
+                #                                                                     min_x_f=400, min_y_f=400 )
+
+                computed_image = sess.run(fetches=[network_manager.get_network_output()],
+                                          feed_dict={network_manager.get_input(): batch_down_sampled})
+
+                print(len(computed_image))
+                print(len(computed_image[0]))
+                print(len(computed_image[0][0]))
+                print(len(computed_image[0][0][0]))
+                print(len(computed_image[0][0][0][0]))
+
+                cv2.imshow("original" + str(i) + "_" + str(j), batch_original[i])
+                cv2.imshow("down_sampled" + str(i) + "_" + str(j), batch_down_sampled[i])
+                cv2.imshow("computed" + str(i) + "_" + str(j), computed_image[0][i])
+            cv2.waitKey(0)
+
+            computed_image = None
+
+            for i in range(5):
+                min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1,
+                                                                                         down_sample_factor=4,
+                                                                                         min_x_f=400, min_y_f=400)
+
+                # batch_down_sampled = 1 - np.asarray(batch_down_sampled)
+
+                # if computed_image != None:
+                #    batch_down_sampled[0] = computed_image[0][0]
+
+                computed_image = sess.run(fetches=[network_manager.get_network_output()],
+                                          feed_dict={network_manager.get_input(): batch_down_sampled})
+
+                """
+                print (len(computed_image))
+                print (len(computed_image[0]))
+                print (len(computed_image[0][0]))
+                print (len(computed_image[0][0][0]))
+                print (len(computed_image[0][0][0][0]))
+                """
+
+                cv2.imshow("2original" + str(i) + "_" + str(j), batch_original[0])
+                cv2.imshow("2down_sampled" + str(i) + "_" + str(j), batch_down_sampled[0])
+                cv2.imshow("2computed" + str(i) + "_" + str(j), computed_image[0][0])
+
+            cv2.waitKey(0)
