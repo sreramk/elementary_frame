@@ -27,9 +27,13 @@ class ImageDSManage:
 
         self.__image_buffer_limit = image_buffer_limit
 
-        self.__image_buffer_dict = collections.OrderedDict()
+        self.__main_img_cache = collections.OrderedDict()
 
-        self.__rand_directories = RandomDict()
+        self.__main_cache_rand = RandomDict()
+
+        self.__down_sampled_img_cache = collections.OrderedDict()
+
+        # self.__down_sampled_img_rand_cache = RandomDict()
 
         self.__buffer_priority = buffer_priority
 
@@ -56,67 +60,111 @@ class ImageDSManage:
     def get_accepted_ext_list(self):
         return self.__accepted_ext.copy()
 
-    def __cache_image(self, directory, img):
+    def __cache_down_sampled_img(self, directory, img):
         """
-        This cache for images ensures that the added image is always added to the very
-        end of the dictionary and if the buffer is full, the oldest or the least frequently
-        accessed image is removed. This will usually be the first record of the ordered
-        dictionary.
+        A cache for downsampled images which ensures that the added image is always added to
+        the very end of the dictionary and if the buffer is full, the oldest or the least
+        frequently accessed image is removed. This will usually be the first record of the
+        ordered dictionary.
         :param directory:
         :param img:
         :return:
         """
-        if len(self.__image_buffer_dict) >= self.__image_buffer_limit:
-            del_key = next(iter(self.__image_buffer_dict))
-            del self.__image_buffer_dict[del_key]
-            self.__rand_directories.delete_element(del_key)
+        if len(self.__down_sampled_img_cache) >= self.__image_buffer_limit:
+            del_key = next(iter(self.__down_sampled_img_cache))
+            del self.__down_sampled_img_cache[del_key]
 
-        self.__image_buffer_dict[directory] = img
-        self.__rand_directories.add_element(directory, img)
+        self.__down_sampled_img_cache[directory] = img
 
-    def __retrieve_img_cache(self, directory):
+    def __retrieve_down_sampled_img_cache(self, directory):
         """
-        Performs image-retrieval from `__image_buffer_dict' ensuring that the most recently
+        Performs image-retrieval from `__down_sampled_img_cache' ensuring that the most recently
         accessed image is least likely to be deleted upon buffer-overflow (which is constrained
-        by `__image_buffer_limit`).
+        by `__image_buffer_limit`). This ensures that the first element of the ordered dictionary
+        is the most old and the most rarely used record.
         :param directory:
         :return:
         """
-        if directory in self.__image_buffer_dict:
-            result = self.__image_buffer_dict[directory]
-            del self.__image_buffer_dict[directory]
+        if directory in self.__down_sampled_img_cache:
+            result = self.__down_sampled_img_cache[directory]
+            del self.__down_sampled_img_cache[directory]
 
             # update position, to mark the most recent access
-            self.__image_buffer_dict[directory] = result
+            self.__down_sampled_img_cache[directory] = result
+            return  result
+
+    def __cache_main_image(self, directory, img):
+        """
+        A cache for images ensures that the added image is always added to the very
+        end of the dictionary and if the buffer is full, the oldest or the least frequently
+        accessed image is removed. This will usually be the first record of the ordered
+        dictionary. This also prepares for random dictionary-key selection.
+        :param directory:
+        :param img:
+        :return:
+        """
+        if len(self.__main_img_cache) >= self.__image_buffer_limit:
+            del_key = next(iter(self.__main_img_cache))
+            del self.__main_img_cache[del_key]
+            self.__main_cache_rand.delete_element(del_key)
+
+        self.__main_img_cache[directory] = img
+        self.__main_cache_rand.add_element(directory, img)
+
+    def __retrieve_main_img_cache(self, directory):
+        """
+        Performs image-retrieval from `__main_img_cache' ensuring that the most recently
+        accessed image is least likely to be deleted upon buffer-overflow (which is constrained
+        by `__image_buffer_limit`). This ensures that the first element of the ordered dictionary
+        is the most old and the most rarely used record.
+        :param directory:
+        :return:
+        """
+        if directory in self.__main_img_cache:
+            result = self.__main_img_cache[directory]
+            del self.__main_img_cache[directory]
+
+            # update position, to mark the most recent access
+            self.__main_img_cache[directory] = result
             return result
 
-    @staticmethod
-    def __size_embedded_directory(directory, min_x_f=None, min_y_f=None):
-        size_directory = None
-        if min_y_f is not None:
-            size_directory = directory + "(" + str(min_y_f) + "_" + str(min_x_f) + ")"
-            if min_x_f is None:
-                raise Exception("Error, min_x_f must not be none or, min_y_f must be none. "
-                                "either both (min_x_f, min_y_f) min x value "
-                                "and min y value must be assigned, or they must both not be"
-                                "simultaneously assigned")
-        elif min_x_f is not None:
-            raise Exception("Error, min_x_f must be none or, min_y_f must not be none. "
-                            "either both (min_x_f, min_y_f) min x value "
-                            "and min y value must be assigned, or they must both not be"
-                            "simultaneously assigned")
-        return size_directory if size_directory is not None else directory
+    def __load_or_create_down_sampled_img(self, directory, down_sample_factor):
+        """
+        Performs a cached load, to reduce the number of file accesses. The number of
+        file access decrease as the size of `__image_buffer_limit` increases.
+        :param directory:
+        :return:
+        """
 
-    def __load_image(self, directory):
+        result = self.__retrieve_down_sampled_img_cache(directory)
+
+        if result is not None:
+            return result
+
+        original_img = self.__load_main_image(directory)
+
+        down_sampled = cv2.resize(original_img,
+                                  dsize=(int(len(original_img[0]) / down_sample_factor),
+                                         int(len(original_img) / down_sample_factor)))
+
+        down_sampled = cv2.resize(down_sampled,
+                                  dsize=(len(original_img[0]),
+                                         len(original_img)))
+
+        self.__cache_down_sampled_img(directory, down_sampled)
+
+        return down_sampled
+
+    def __load_main_image(self, directory):
 
         """
         Performs a cached load, to reduce the number of file accesses. The number of
-        file access decrease as the size of `__image_buffer_limit` increases
+        file access decrease as the size of `__image_buffer_limit` increases.
         :param directory:
         :return:
         """
 
-        result = self.__retrieve_img_cache(directory)
+        result = self.__retrieve_main_img_cache(directory)
 
         if result is not None:
             return result
@@ -124,7 +172,7 @@ class ImageDSManage:
         new_img = cv2.imread(directory)
         new_img = numpy.float32(new_img) / 255.0
 
-        self.__cache_image(directory=directory, img=new_img)
+        self.__cache_main_image(directory=directory, img=new_img)
 
         return new_img
 
@@ -138,8 +186,8 @@ class ImageDSManage:
         """
         self.__image_buffer_limit = new_limit_size
 
-        while len(self.__image_buffer_dict) > self.__image_buffer_limit:
-            del self.__image_buffer_dict[next(iter(self.__image_buffer_dict))]
+        while len(self.__main_img_cache) > self.__image_buffer_limit:
+            del self.__main_img_cache[next(iter(self.__main_img_cache))]
 
     @staticmethod
     def __crop_img(image, size_x, size_y, pos_x, pos_y):
@@ -172,8 +220,8 @@ class ImageDSManage:
         rand_choose_ds = random.random()
         rand_choose_buf = random.random() * self.__buffer_priority
 
-        if rand_choose_buf > rand_choose_ds and len(self.__rand_directories) > 0:
-            rand_dir = self.__rand_directories.random_key()
+        if rand_choose_buf > rand_choose_ds and len(self.__main_cache_rand) > 0:
+            rand_dir = self.__main_cache_rand.random_key()
         else:
             rand_dir = random.choice(self.__image_dir_list)
 
@@ -191,17 +239,12 @@ class ImageDSManage:
 
         for i in range(batch_size):
 
-            original_img = self.__load_image(self.__choose_dir())
+            directory = self.__choose_dir()
+            original_img = self.__load_main_image(directory)
 
             # reducing the information contained in the image
 
-            down_sampled = cv2.resize(original_img,
-                                      dsize=(int(len(original_img[0]) / down_sample_factor),
-                                             int(len(original_img) / down_sample_factor)))
-
-            down_sampled = cv2.resize(down_sampled,
-                                      dsize=(len(original_img[0]),
-                                             len(original_img)))
+            down_sampled = self.__load_or_create_down_sampled_img(directory, down_sample_factor)
 
             if (min_y is None) or (min_y > len(original_img)):
                 min_y = len(original_img)
