@@ -1,4 +1,6 @@
 # Copyright (c) 2019 K Sreram, All rights reserved
+import math
+
 import cv2
 import os
 
@@ -11,6 +13,13 @@ def log10(x):
     numerator = tf.log(x)
     denominator = tf.log(tf.constant(10, dtype=numerator.dtype))
     return numerator / denominator
+
+
+class InvalidOutputLayer(Exception):
+    """
+    Raised when the layer in the network requested as the output layer is invalid.
+    """
+    pass
 
 
 class SRNetworkManager:
@@ -45,6 +54,8 @@ class SRNetworkManager:
 
         self.__optimizer = None
 
+        self.__output_layers = {}
+
         with tf.device(self.__device):
             self.__network_input = tf.placeholder(dtype=tf.float32, shape=[None, None, None, None],
                                                   name=self.__name + "_input")
@@ -52,6 +63,14 @@ class SRNetworkManager:
                                                          name=self.__name + "_expected_out")
 
         self.__saver = None
+
+    def number_of_layers(self):
+        return len(self.__conv_layers)
+
+    def get_layer(self, index):
+        if index > self.number_of_layers():
+            return None
+        return self.__conv_layers[index]
 
     def initialize_saver(self):
         self.__saver = tf.train.Saver()
@@ -108,7 +127,7 @@ class SRNetworkManager:
 
         with tf.device(self.get_device_name()):
             if filter_subset is None:
-                filter_subset = range(1, len(self.__filters_arch))
+                filter_subset = range(0, len(self.__filters_arch))
             if create_network_flag is True:
                 for i in filter_subset:
                     # print (self.__filters_arch[i])
@@ -127,21 +146,21 @@ class SRNetworkManager:
                     self.__biases.append(tf.get_variable(name=self.__name + "_B_" + str(i),
                                                          shape=self.__bias_arch[i]))
             else:
-                print ("hit 3")
+                # print ("hit 3")
                 self.__filters = filter_list
 
         return True
 
-    def construct_layers(self, device=None, add_input_layer=True, force_valid_output_range=True, filter_subset=None):
+    def construct_layers(self, device=None, add_input_layer=True, filter_subset=None):
         """
         Constructs convolution layers. Can be called multiple times, to extend the size
         of the network. But in case it is done, `add_input_layer` must be set to `False`
         for all the following calls. `filter_subset` can be used to directly assign a
         set of already constructed filters. This is allowed to help the system construct
         multiple architectures with the same set of filters.
-        :param force_valid_output_range:
         :param device:
         :param add_input_layer:
+        :param force_valid_output_range:
         :param filter_subset:
         :return:
         """
@@ -169,28 +188,14 @@ class SRNetworkManager:
                 cur_layer = tf.add(cur_layer, self.__biases[i])
                 cur_layer = tf.nn.relu(cur_layer)
                 self.__conv_layers.append(cur_layer)
-            if force_valid_output_range:
-                output_element = self.__conv_layers[len(self.__conv_layers) -1]
-                output_element = tf.divide(output_element, tf.reduce_max(output_element))
-                self.__conv_layers.pop()
-                self.__conv_layers.append(output_element)
+
+            # if force_valid_output_range:
+            #     output_element = self.__conv_layers[len(self.__conv_layers) -1]
+            #     output_element = tf.divide(output_element, tf.reduce_max(output_element))
+            #     self.__conv_layers.pop()
+            #     self.__conv_layers.append(output_element)
 
         return True
-
-    def construct_network(self, create_network_flag, device, filter_list=None,
-                          add_input_layer=True, filter_subset=None):
-        """
-        Repeated call of this function will prompt the extension of the network, but the
-        `add_input_layer` flag must be set to false.
-        :param create_network_flag:
-        :param device:
-        :param filter_list:
-        :param add_input_layer:
-        :param filter_subset:
-        :return:
-        """
-        self.construct_filters(create_network_flag, device, filter_list)
-        self.construct_layers(device, add_input_layer, filter_subset)
 
     def check_if_file_exists(self):
         return os.path.isfile(self.__param_path)
@@ -205,11 +210,47 @@ class SRNetworkManager:
         if self.__saver is not None:
             self.__saver.save(session, self.__param_path)
 
-    def get_network_output(self):
-        return self.__conv_layers[len(self.__conv_layers) - 1]
+    def get_or_init_network_output(self, output_index=None):
+        """
+        Constructs or obtains the output given a layer. This ensures that the
+        output layer is fully constructed before returing. Upon failure it throws
+        the `InvalidOutputLayer` exception.
+        :param output_index: This accepts either a list or a single integer value.
+                             In case a list is give, the operation is performed for
+                             all the values in the list and thus, returns another
+                             list with its corresponding results. The value represents
+                             the layer's index. For a negative number, the index
+                             is resolved to be self.number_of_layers() - output_index -1
+        :return:
+        """
+        if isinstance(output_index, list):
+            output_index_list = []
+
+            for out_index in output_index:
+                output_index_list.append(self.__get_or_init_network_output(output_index=out_index))
+
+            return output_index_list
+        else:
+            return self.__get_or_init_network_output(output_index=output_index)
+
+    def __get_or_init_network_output(self, output_index=None):
+
+        if output_index is None:
+            output_index = self.number_of_layers() -1
+
+        if abs(output_index) <= self.number_of_layers():
+            if output_index not in self.__output_layers:
+                output_element = self.__conv_layers[output_index]
+                output_element = tf.divide(output_element, tf.reduce_max(output_element))
+                self.__output_layers[output_index] = output_element
+
+            return self.__output_layers[output_index]
+
+        raise InvalidOutputLayer("Error, the index for obtaining the output layer is invalid")
 
     def get_last_layer(self):
-        return self.__conv_layers[len(self.__conv_layers) - 1]
+        # return self.__conv_layers[len(self.__conv_layers) - 1]
+        return self.get_or_init_network_output(-1)
 
     def set_rms_network_loss(self, reset=False):
         if SRNetworkManager.RMS_ERROR not in self.__loss_network or reset:
@@ -312,9 +353,9 @@ class SRNetworkManager:
         return self.__optimizer
 
 
-if __name__ == "__main__":
+def main():
     img_manager = ImageDSManage(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
-                                image_buffer_limit=100)
+                                image_buffer_limit=100, buffer_priority=100)
 
     weights_file_name = "w"
 
@@ -322,15 +363,15 @@ if __name__ == "__main__":
     network_manager.set_strides_arch(SRNetworkManager.generate_strides_one(3))
 
     filter_arch = [
-        [10, 10, 10, 3],
-        [2, 2, 3, 10],
-        [10, 10, 10, 3]
+        [10, 10, 3, 80],
+        [2, 2, 80, 40],
+        [10, 10, 40, 3]
     ]
 
     network_manager.set_filter_arch(filter_arch)
 
     bias_arch = [
-        [3], [10], [3]
+        [80], [40], [3]
     ]
 
     network_manager.set_bias_arch(bias_arch)
@@ -347,6 +388,8 @@ if __name__ == "__main__":
 
     adam_optimizer = network_manager.get_adam_loss_optimizer(network_loss)
 
+    network_manager.get_or_init_network_output([None, -2])
+
     with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
         init = tf.initialize_all_variables()
 
@@ -354,7 +397,7 @@ if __name__ == "__main__":
 
         sess.graph.finalize()
 
-        for j in range(100):
+        for j in range(10000):
 
             print("Count: " + str(j))
 
@@ -373,18 +416,23 @@ if __name__ == "__main__":
             for i in range(10000):
                 # for j in range(10):
 
+                min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
+                                                                                         down_sample_factor=4,
+                                                                                         min_x_f=70,
+                                                                                         min_y_f=70)
+
                 minimize, loss = sess.run(fetches=[adam_optimizer, network_loss],
                                           feed_dict={network_manager.get_input(): batch_down_sampled,
                                                      network_manager.get_expected_out(): batch_original,
-                                                  })
+                                                     })
                 print("epoch :" + str(i))
                 print("loss: " + str(loss))
 
-            for i in range(6):
+            for i in range(1):
                 # min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1, down_sample_factor=10,
                 #                                                                     min_x_f=400, min_y_f=400 )
 
-                computed_image = sess.run(fetches=[network_manager.get_network_output()],
+                computed_image = sess.run(fetches=[network_manager.get_or_init_network_output()],
                                           feed_dict={network_manager.get_input(): batch_down_sampled})
 
                 print(len(computed_image))
@@ -400,7 +448,7 @@ if __name__ == "__main__":
 
             computed_image = None
 
-            for i in range(5):
+            for i in range(2):
                 min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1,
                                                                                          down_sample_factor=4,
                                                                                          min_x_f=400, min_y_f=400)
@@ -410,7 +458,7 @@ if __name__ == "__main__":
                 # if computed_image != None:
                 #    batch_down_sampled[0] = computed_image[0][0]
 
-                computed_image = sess.run(fetches=[network_manager.get_network_output()],
+                computed_image = sess.run(fetches=[network_manager.get_or_init_network_output()],
                                           feed_dict={network_manager.get_input(): batch_down_sampled})
 
                 """
@@ -425,4 +473,38 @@ if __name__ == "__main__":
                 cv2.imshow("2down_sampled" + str(i) + "_" + str(j), batch_down_sampled[0])
                 cv2.imshow("2computed" + str(i) + "_" + str(j), computed_image[0][0])
 
+            for i in range(2):
+                min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1,
+                                                                                         down_sample_factor=4,
+                                                                                         min_x_f=400, min_y_f=400)
+
+                # batch_down_sampled = 1 - np.asarray(batch_down_sampled)
+
+                # if computed_image != None:
+                #    batch_down_sampled[0] = computed_image[0][0]
+
+                computed_image, computed_org = sess.run(fetches=[
+                                                   network_manager.get_or_init_network_output(output_index=-2),
+                                                   network_manager.get_or_init_network_output()],
+                                          feed_dict={network_manager.get_input(): batch_down_sampled})
+
+                """
+                print (len(computed_image))
+                print (len(computed_image[0]))
+                print (len(computed_image[0][0]))
+                print (len(computed_image[0][0][0]))
+                print (len(computed_image[0][0][0][0]))
+                """
+
+                cv2.imshow("L2_2original" + str(i) + "_" + str(j), batch_original[0])
+                cv2.imshow("L2_2down_sampled" + str(i) + "_" + str(j), batch_down_sampled[0])
+                cv2.imshow("L2_2computed" + str(i) + "_" + str(j), computed_org[0])
+                for x in range(0, int(40)):
+                    computed_image_temp = computed_image[0][:, :, x]
+                    cv2.imshow("L2_2computed" + str(i) + "_" + str(j) +"_" + str(x), computed_image_temp)
+
             cv2.waitKey(0)
+            cv2.destroyAllWindows()
+
+
+main()
