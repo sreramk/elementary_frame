@@ -1,5 +1,4 @@
 # Copyright (c) 2019 K Sreram, All rights reserved
-import math
 
 import cv2
 import os
@@ -7,6 +6,10 @@ import os
 import tensorflow as tf
 
 from prepare_dataset.img_ds_manage import ImageDSManage
+
+
+from datetime import datetime
+
 
 
 def log10(x):
@@ -359,7 +362,7 @@ def main():
 
     weights_file_name = "w"
 
-    network_manager = SRNetworkManager("model_1", "/home/sreramk/PycharmProjects/neuralwithtensorgpu/models/model")
+    network_manager = SRNetworkManager("model_1", "/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/")
     network_manager.set_strides_arch(SRNetworkManager.generate_strides_one(3))
 
     filter_arch = [
@@ -397,7 +400,7 @@ def main():
 
         sess.graph.finalize()
 
-        for j in range(10000):
+        for j in range(100):
 
             print("Count: " + str(j))
 
@@ -412,7 +415,7 @@ def main():
             # batch_down_sampled = np.asarray(batch_down_sampled)
 
             # batch_down_sampled.fill(1.0)
-
+            tstart = None
             for i in range(10000):
                 # for j in range(10):
 
@@ -425,8 +428,14 @@ def main():
                                           feed_dict={network_manager.get_input(): batch_down_sampled,
                                                      network_manager.get_expected_out(): batch_original,
                                                      })
-                print("epoch :" + str(i))
-                print("loss: " + str(loss))
+                if i % 100 == 0:
+                    print("epoch :" + str(i))
+                    print("loss: " + str(loss))
+                    tend = datetime.now()
+                    if tstart is None:
+                        tstart = tend
+                    print ("Time = " + str(tend - tstart))
+                    tstart = datetime.now()
 
             for i in range(1):
                 # min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1, down_sample_factor=10,
@@ -441,10 +450,11 @@ def main():
                 print(len(computed_image[0][0][0]))
                 print(len(computed_image[0][0][0][0]))
 
-                cv2.imshow("original" + str(i) + "_" + str(j), batch_original[i])
-                cv2.imshow("down_sampled" + str(i) + "_" + str(j), batch_down_sampled[i])
-                cv2.imshow("computed" + str(i) + "_" + str(j), computed_image[0][i])
-            cv2.waitKey(0)
+                #cv2.imshow("original" + str(i) + "_" + str(j), batch_original[i])
+                #cv2.imshow("down_sampled" + str(i) + "_" + str(j), batch_down_sampled[i])
+                #cv2.imshow("computed" + str(i) + "_" + str(j), computed_image[0][i])
+
+            #cv2.waitKey(0)
 
             computed_image = None
 
