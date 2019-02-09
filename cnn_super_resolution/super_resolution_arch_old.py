@@ -357,164 +357,168 @@ class SRNetworkManager:
 
 
 def main():
-    img_manager = ImageDSManage(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
-                                image_buffer_limit=100, buffer_priority=100)
 
-    weights_file_name = "w"
+    g = tf.Graph()
+    with g.as_default():
 
-    network_manager = SRNetworkManager("model_1", "/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/")
-    network_manager.set_strides_arch(SRNetworkManager.generate_strides_one(3))
+        img_manager = ImageDSManage(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
+                                    image_buffer_limit=100, buffer_priority=100)
 
-    filter_arch = [
-        [10, 10, 3, 80],
-        [2, 2, 80, 40],
-        [10, 10, 40, 3]
-    ]
+        weights_file_name = "w"
 
-    network_manager.set_filter_arch(filter_arch)
+        network_manager = SRNetworkManager("model_1", "/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/")
+        network_manager.set_strides_arch(SRNetworkManager.generate_strides_one(3))
 
-    bias_arch = [
-        [80], [40], [3]
-    ]
+        filter_arch = [
+            [10, 10, 3, 80],
+            [2, 2, 80, 40],
+            [10, 10, 40, 3]
+        ]
 
-    network_manager.set_bias_arch(bias_arch)
+        network_manager.set_filter_arch(filter_arch)
 
-    network_manager.get_device_name()
+        bias_arch = [
+            [80], [40], [3]
+        ]
 
-    network_manager.init_device_name('/gpu:0')
+        network_manager.set_bias_arch(bias_arch)
 
-    network_manager.construct_filters(create_network_flag=network_manager.check_if_file_exists())
+        network_manager.get_device_name()
 
-    network_manager.construct_layers()
+        network_manager.init_device_name('/gpu:0')
 
-    network_loss = network_manager.get_input_transform_restrain_loss()
+        network_manager.construct_filters(create_network_flag=network_manager.check_if_file_exists())
 
-    adam_optimizer = network_manager.get_adam_loss_optimizer(network_loss)
+        network_manager.construct_layers()
 
-    network_manager.get_or_init_network_output([None, -2])
+        network_loss = network_manager.get_input_transform_restrain_loss()
 
-    with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
-        init = tf.initialize_all_variables()
+        adam_optimizer = network_manager.get_adam_loss_optimizer(network_loss)
 
-        sess.run(init)
+        network_manager.get_or_init_network_output([None, -2])
 
-        sess.graph.finalize()
+        with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
+            init = tf.initialize_all_variables()
 
-        for j in range(100):
+            sess.run(init)
 
-            print("Count: " + str(j))
+            sess.graph.finalize()
 
-            min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
-                                                                                     down_sample_factor=4,
-                                                                                     min_x_f=70,
-                                                                                     min_y_f=70)
+            for j in range(100):
 
-            # for i in range(len(batch_original)):
-            #    batch_original[i] = cv2.resize(batch_original[i], dsize=(52, 52))
-
-            # batch_down_sampled = np.asarray(batch_down_sampled)
-
-            # batch_down_sampled.fill(1.0)
-            tstart = None
-            for i in range(10000):
-                # for j in range(10):
+                print("Count: " + str(j))
 
                 min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
                                                                                          down_sample_factor=4,
                                                                                          min_x_f=70,
                                                                                          min_y_f=70)
 
-                minimize, loss = sess.run(fetches=[adam_optimizer, network_loss],
-                                          feed_dict={network_manager.get_input(): batch_down_sampled,
-                                                     network_manager.get_expected_out(): batch_original,
-                                                     })
-                if i % 100 == 0:
-                    print("epoch :" + str(i))
-                    print("loss: " + str(loss))
-                    tend = datetime.now()
-                    if tstart is None:
-                        tstart = tend
-                    print ("Time = " + str(tend - tstart))
-                    tstart = datetime.now()
+                # for i in range(len(batch_original)):
+                #    batch_original[i] = cv2.resize(batch_original[i], dsize=(52, 52))
 
-            for i in range(1):
-                # min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1, down_sample_factor=10,
-                #                                                                     min_x_f=400, min_y_f=400 )
+                # batch_down_sampled = np.asarray(batch_down_sampled)
 
-                computed_image = sess.run(fetches=[network_manager.get_or_init_network_output()],
-                                          feed_dict={network_manager.get_input(): batch_down_sampled})
+                # batch_down_sampled.fill(1.0)
+                tstart = None
+                for i in range(10000):
+                    # for j in range(10):
 
-                print(len(computed_image))
-                print(len(computed_image[0]))
-                print(len(computed_image[0][0]))
-                print(len(computed_image[0][0][0]))
-                print(len(computed_image[0][0][0][0]))
+                    min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
+                                                                                             down_sample_factor=4,
+                                                                                             min_x_f=70,
+                                                                                             min_y_f=70)
 
-                #cv2.imshow("original" + str(i) + "_" + str(j), batch_original[i])
-                #cv2.imshow("down_sampled" + str(i) + "_" + str(j), batch_down_sampled[i])
-                #cv2.imshow("computed" + str(i) + "_" + str(j), computed_image[0][i])
+                    minimize, loss = sess.run(fetches=[adam_optimizer, network_loss],
+                                              feed_dict={network_manager.get_input(): batch_down_sampled,
+                                                         network_manager.get_expected_out(): batch_original,
+                                                         })
+                    if i % 100 == 0:
+                        print("epoch :" + str(i))
+                        print("loss: " + str(loss))
+                        tend = datetime.now()
+                        if tstart is None:
+                            tstart = tend
+                        print ("Time = " + str(tend - tstart))
+                        tstart = datetime.now()
 
-            #cv2.waitKey(0)
+                for i in range(1):
+                    # min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1, down_sample_factor=10,
+                    #                                                                     min_x_f=400, min_y_f=400 )
 
-            computed_image = None
+                    computed_image = sess.run(fetches=[network_manager.get_or_init_network_output()],
+                                              feed_dict={network_manager.get_input(): batch_down_sampled})
 
-            for i in range(2):
-                min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1,
-                                                                                         down_sample_factor=4,
-                                                                                         min_x_f=400, min_y_f=400)
+                    print(len(computed_image))
+                    print(len(computed_image[0]))
+                    print(len(computed_image[0][0]))
+                    print(len(computed_image[0][0][0]))
+                    print(len(computed_image[0][0][0][0]))
 
-                # batch_down_sampled = 1 - np.asarray(batch_down_sampled)
+                    #cv2.imshow("original" + str(i) + "_" + str(j), batch_original[i])
+                    #cv2.imshow("down_sampled" + str(i) + "_" + str(j), batch_down_sampled[i])
+                    #cv2.imshow("computed" + str(i) + "_" + str(j), computed_image[0][i])
 
-                # if computed_image != None:
-                #    batch_down_sampled[0] = computed_image[0][0]
+                #cv2.waitKey(0)
 
-                computed_image = sess.run(fetches=[network_manager.get_or_init_network_output()],
-                                          feed_dict={network_manager.get_input(): batch_down_sampled})
+                computed_image = None
 
-                """
-                print (len(computed_image))
-                print (len(computed_image[0]))
-                print (len(computed_image[0][0]))
-                print (len(computed_image[0][0][0]))
-                print (len(computed_image[0][0][0][0]))
-                """
+                for i in range(2):
+                    min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1,
+                                                                                             down_sample_factor=4,
+                                                                                             min_x_f=400, min_y_f=400)
 
-                cv2.imshow("2original" + str(i) + "_" + str(j), batch_original[0])
-                cv2.imshow("2down_sampled" + str(i) + "_" + str(j), batch_down_sampled[0])
-                cv2.imshow("2computed" + str(i) + "_" + str(j), computed_image[0][0])
+                    # batch_down_sampled = 1 - np.asarray(batch_down_sampled)
 
-            for i in range(2):
-                min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1,
-                                                                                         down_sample_factor=4,
-                                                                                         min_x_f=400, min_y_f=400)
+                    # if computed_image != None:
+                    #    batch_down_sampled[0] = computed_image[0][0]
 
-                # batch_down_sampled = 1 - np.asarray(batch_down_sampled)
+                    computed_image = sess.run(fetches=[network_manager.get_or_init_network_output()],
+                                              feed_dict={network_manager.get_input(): batch_down_sampled})
 
-                # if computed_image != None:
-                #    batch_down_sampled[0] = computed_image[0][0]
+                    """
+                    print (len(computed_image))
+                    print (len(computed_image[0]))
+                    print (len(computed_image[0][0]))
+                    print (len(computed_image[0][0][0]))
+                    print (len(computed_image[0][0][0][0]))
+                    """
 
-                computed_image, computed_org = sess.run(fetches=[
-                                                   network_manager.get_or_init_network_output(output_index=-2),
-                                                   network_manager.get_or_init_network_output()],
-                                          feed_dict={network_manager.get_input(): batch_down_sampled})
+                    cv2.imshow("2original" + str(i) + "_" + str(j), batch_original[0])
+                    cv2.imshow("2down_sampled" + str(i) + "_" + str(j), batch_down_sampled[0])
+                    cv2.imshow("2computed" + str(i) + "_" + str(j), computed_image[0][0])
 
-                """
-                print (len(computed_image))
-                print (len(computed_image[0]))
-                print (len(computed_image[0][0]))
-                print (len(computed_image[0][0][0]))
-                print (len(computed_image[0][0][0][0]))
-                """
+                for i in range(2):
+                    min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1,
+                                                                                             down_sample_factor=4,
+                                                                                             min_x_f=400, min_y_f=400)
 
-                cv2.imshow("L2_2original" + str(i) + "_" + str(j), batch_original[0])
-                cv2.imshow("L2_2down_sampled" + str(i) + "_" + str(j), batch_down_sampled[0])
-                cv2.imshow("L2_2computed" + str(i) + "_" + str(j), computed_org[0])
-                for x in range(0, int(40)):
-                    computed_image_temp = computed_image[0][:, :, x]
-                    cv2.imshow("L2_2computed" + str(i) + "_" + str(j) +"_" + str(x), computed_image_temp)
+                    # batch_down_sampled = 1 - np.asarray(batch_down_sampled)
 
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+                    # if computed_image != None:
+                    #    batch_down_sampled[0] = computed_image[0][0]
+
+                    computed_image, computed_org = sess.run(fetches=[
+                                                       network_manager.get_or_init_network_output(output_index=-2),
+                                                       network_manager.get_or_init_network_output()],
+                                              feed_dict={network_manager.get_input(): batch_down_sampled})
+
+                    """
+                    print (len(computed_image))
+                    print (len(computed_image[0]))
+                    print (len(computed_image[0][0]))
+                    print (len(computed_image[0][0][0]))
+                    print (len(computed_image[0][0][0][0]))
+                    """
+
+                    cv2.imshow("L2_2original" + str(i) + "_" + str(j), batch_original[0])
+                    cv2.imshow("L2_2down_sampled" + str(i) + "_" + str(j), batch_down_sampled[0])
+                    cv2.imshow("L2_2computed" + str(i) + "_" + str(j), computed_org[0])
+                    for x in range(0, int(40)):
+                        computed_image_temp = computed_image[0][:, :, x]
+                        cv2.imshow("L2_2computed" + str(i) + "_" + str(j) +"_" + str(x), computed_image_temp)
+
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
 
 
 main()
