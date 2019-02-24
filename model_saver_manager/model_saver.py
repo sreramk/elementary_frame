@@ -13,7 +13,7 @@ from multiprocessing import Pool, Process, Pipe, Queue
 import tensorflow as tf
 
 from model_saver_manager.exceptions import InvalidCheckpointID, ArgumentMustBeAListOfTensors, InvalidArgumentType, \
-    InvalidNumberOfArgumentsPassed, InvalidLeftRightArgumentCombination
+    InvalidNumberOfArgumentsPassed, InvalidLeftRightArgumentCombination, InvalidArgument
 
 
 class ModelSaver:
@@ -29,12 +29,18 @@ class ModelSaver:
     STATIC_CHECKPOINT = 1  # replaces the same checkpoint for each iteration.
     DYNAMIC_CHECKPOINT = 2  # creates a new checkpoint for each iteration.
 
-    NONE_CHECKPOINT = -1
+    # The following are the checkpoint constants used. These values are negative as the valid range for the checkpoints
+    # starts from zero and these negative values can be used to represent special types of checkpoints like the default
+    # checkpoint, the last checkpoint, the latest used checkpoint etc.
+
+    NONE_CHECKPOINT = -1  # represents that no valid checkpoint is used. The checkpoint resolver returns None for this.
 
     LAST_CHECKPOINT = -2  # the most recent record
     FIRST_CHECKPOINT = -3  # the earliest record that has not been deleted.
 
     DEFAULT_CHECKPOINT = -4  # represents the currently active record.
+
+    LATEST_CHECK_POINT_ID = -5  # represents the most recently used checkpoint.
 
     IN_GET_METHOD = True
     NOT_IN_GET_METHOD = False
@@ -268,7 +274,40 @@ class ModelSaver:
         self.__header[ModelSaver.H_FREE_CHECK_POINT_ID] = new_id + 1
         return new_id
 
-    def __resolve_checkpoint_id(self, checkpoint_id, in_get_method):
+    def __get_latest_checkpoint_safe(self, ondefault_checkpoint=LAST_CHECKPOINT):
+        """
+        ties to get the last used checkpoint, or if this is not possible, tries to get a different checkpoint as a
+        default.
+        :param ondefault_checkpoint:
+        :return:
+        """
+        if ondefault_checkpoint == ModelSaver.LATEST_CHECK_POINT_ID:
+            raise InvalidArgument
+
+        checkpoint_store = self.__header[ModelSaver.H_CHECK_POINT_STORE]
+        latest_checkpoint = self.__header[ModelSaver.H_LATEST_CHECK_POINT_ID]
+        if checkpoint_store is not None and \
+                latest_checkpoint is not None and \
+                latest_checkpoint in checkpoint_store:
+            return latest_checkpoint
+        return self.__resolve_checkpoint_id(ondefault_checkpoint, ModelSaver.IN_GET_METHOD)
+
+    def __resolve_checkpoint_id(self, checkpoint_id, in_get_method, iteration_count=0):
+        """
+
+        :param checkpoint_id:
+        :param in_get_method:
+        :param iteration_count:
+        :return:
+        """
+        checkpoint_id_list = None
+
+        if not isinstance(checkpoint_id, int):
+            checkpoint_id_list = copy.deepcopy(checkpoint_id)
+            if len(checkpoint_id_list) <= iteration_count:
+                raise InvalidCheckpointID
+
+            checkpoint_id = checkpoint_id[iteration_count]
 
         checkpoint_store = self.__header[ModelSaver.H_CHECK_POINT_STORE]
 
@@ -289,8 +328,17 @@ class ModelSaver:
         elif checkpoint_id == ModelSaver.DEFAULT_CHECKPOINT:
             if self.__checkpoint_record is not None:
                 return self.__checkpoint_record[ModelSaver.H_CHECK_POINT_ID]
+        elif checkpoint_id == ModelSaver.LATEST_CHECK_POINT_ID:
+            latest_checkpoint = self.__header[ModelSaver.H_LATEST_CHECK_POINT_ID]
+            if latest_checkpoint is not None and \
+                latest_checkpoint in checkpoint_store:
+                return latest_checkpoint
         elif checkpoint_id == ModelSaver.NONE_CHECKPOINT:
             return None
+
+        if checkpoint_id_list is not None and len(checkpoint_id_list) > iteration_count:
+            iteration_count += 1
+            return  self.__resolve_checkpoint_id(checkpoint_id_list, in_get_method, iteration_count)
 
         raise InvalidCheckpointID
 
@@ -371,7 +419,8 @@ class ModelSaver:
         self.__delete_header_record(checkpoint_id, commit)
         os.remove(checkpoint_addr)
 
-    def load_checkpoint(self, reset=False, checkpoint_id=LAST_CHECKPOINT, load_tensors=True, commit=True, **args):
+    def load_checkpoint(self, checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT),
+                        load_tensors=True, commit=True,reset=False, **args):
 
         checkpoint_id = self.__resolve_checkpoint_id(checkpoint_id, ModelSaver.IN_GET_METHOD)
 
@@ -389,7 +438,7 @@ class ModelSaver:
                     self.__converter_instance.set_tensors(pyprams, **args)
                 if commit:
                     self.___save_header()
-                    
+
     def change_working_tensor_prams(self, new_tensor_prams):
         self.__converter_instance.change_tensors(new_tensor_prams)
 
@@ -437,14 +486,14 @@ class ModelSaver:
     def checkpoint_model(self, checkpoint_efficiency, skip_type=TimeIterSkipManager.ST_ITER_SKIP,
                          skip_duration=TimeIterSkipManager.DEFAULT_SKIP,
                          checkpoint_type=DYNAMIC_CHECKPOINT,
-                         checkpoint_id=LAST_CHECKPOINT, reset=False, **args):
+                         checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT), reset=False, **args):
         """
         This is called periodically to actually checkpoint the model's state
         :return:
         """
         if self.__ensure_first_run() or reset:
             checkpoint_id = self.__resolve_checkpoint_id(checkpoint_id, ModelSaver.NOT_IN_GET_METHOD)
-            self.load_checkpoint(reset=False, checkpoint_id=checkpoint_id, **args)
+            self.load_checkpoint(checkpoint_id=checkpoint_id,reset=False, **args)
             self.__time_iter_skip = ModelSaver.TimeIterSkipManager(skip_type=skip_type, skip_duration=skip_duration)
 
         if self.__time_iter_skip.check_execute_checkpoint():

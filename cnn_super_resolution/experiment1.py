@@ -175,7 +175,7 @@ class Model2:
 
 
 def trainer(loss_num, batch_down_sampled, batch_original, name="1"):
-    img_manager = ImageDSManage(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
+    img_manager = ImageDSManage(["/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_train_HR/"],
                                 image_buffer_limit=50, buffer_priority=50)
 
     # input_data = tf.placeholder(dtype=tf.float32, shape=[None, None, None, None])
@@ -205,7 +205,7 @@ def trainer(loss_num, batch_down_sampled, batch_original, name="1"):
     parameters.extend(bisases)
 
     modelsave = model_saver.ModelSaver('exp1_',parameters,
-                    save_file_path="/home/sreramk/PycharmProjects/neuralwithtensorgpu/model_checkpoints")
+                    save_file_path="/media/sreramk/storage-main/elementary_frame/model_checkpoints")
     query = modelsave.query_checkpoint_info(check_point_id_range=(0, 100))
     print (query)
     model = model2.create_model()

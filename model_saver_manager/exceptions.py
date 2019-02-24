@@ -20,6 +20,12 @@ class InvalidArgumentType(ModelSaverException):
     pass
 
 
+class InvalidArgument(ModelSaverException):
+    """
+    Raised when the particular argument passed to a method is invalid and execution of which may lead to undefined
+    behavior.
+    """
+
 class InvalidNumberOfArgumentsPassed(ModelSaverException):
     """
     Certain methods accept only a certain number of arguments. When such a condition is violated, this exception is
