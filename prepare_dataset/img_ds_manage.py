@@ -10,7 +10,7 @@ from typing import List
 import collections
 
 from utils import RandomDict
-
+from utils import check_size
 
 class ImageDSManage:
     """

@@ -357,88 +357,43 @@ class SRNetworkManager:
 
 
 def main():
+    img_manager = ImageDSManage(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
+                                image_buffer_limit=100, buffer_priority=100)
 
-    g1 = tf.Graph()
-    with g1.as_default():
+    weights_file_name = "w"
 
-        img_manager = ImageDSManage(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
-                                    image_buffer_limit=100, buffer_priority=100)
+    network_manager = SRNetworkManager("model_1", "/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/")
+    network_manager.set_strides_arch(SRNetworkManager.generate_strides_one(3))
 
-        weights_file_name = "w"
+    filter_arch = [
+        [10, 10, 3, 80],
+        [2, 2, 80, 40],
+        [10, 10, 40, 3]
+    ]
 
-        network_manager = SRNetworkManager("model_1", "/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/")
-        network_manager.set_strides_arch(SRNetworkManager.generate_strides_one(3))
+    network_manager.set_filter_arch(filter_arch)
 
-        filter_arch = [
-            [10, 10, 3, 80],
-            [2, 2, 80, 40],
-            [10, 10, 40, 3]
-        ]
+    bias_arch = [
+        [80], [40], [3]
+    ]
 
-        network_manager.set_filter_arch(filter_arch)
+    network_manager.set_bias_arch(bias_arch)
 
-        bias_arch = [
-            [80], [40], [3]
-        ]
+    network_manager.get_device_name()
 
-        network_manager.set_bias_arch(bias_arch)
+    network_manager.init_device_name('/gpu:0')
 
-        network_manager.get_device_name()
+    network_manager.construct_filters(create_network_flag=network_manager.check_if_file_exists())
 
-        network_manager.init_device_name('/gpu:0')
+    network_manager.construct_layers()
 
-        network_manager.construct_filters(create_network_flag=network_manager.check_if_file_exists())
+    network_loss = network_manager.get_input_transform_restrain_loss()
 
-        network_manager.construct_layers()
+    adam_optimizer = network_manager.get_adam_loss_optimizer(network_loss)
 
-        network_loss = network_manager.get_input_transform_restrain_loss()
+    network_manager.get_or_init_network_output([None, -2])
 
-        adam_optimizer = network_manager.get_adam_loss_optimizer(network_loss)
-
-        network_manager.get_or_init_network_output([None, -2])
-
-    g2 = tf.Graph()
-    with g2.as_default():
-
-        img_manager = ImageDSManage(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
-                                    image_buffer_limit=100, buffer_priority=100)
-
-        weights_file_name = "w"
-
-        network_manager = SRNetworkManager("model_1",
-                                           "/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/")
-        network_manager.set_strides_arch(SRNetworkManager.generate_strides_one(3))
-
-        filter_arch = [
-            [10, 10, 3, 80],
-            [2, 2, 80, 40],
-            [10, 10, 40, 3]
-        ]
-
-        network_manager.set_filter_arch(filter_arch)
-
-        bias_arch = [
-            [80], [40], [3]
-        ]
-
-    with g2.as_default():
-        network_manager.set_bias_arch(bias_arch)
-
-        network_manager.get_device_name()
-
-        network_manager.init_device_name('/gpu:0')
-
-        network_manager.construct_filters(create_network_flag=network_manager.check_if_file_exists())
-
-        network_manager.construct_layers()
-
-        network_loss = network_manager.get_input_transform_restrain_loss()
-
-        adam_optimizer = network_manager.get_adam_loss_optimizer(network_loss)
-
-        network_manager.get_or_init_network_output([None, -2])
-
-    with tf.Session(config=tf.ConfigProto(log_device_placement=True), graph=g2) as sess:
+    with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
         init = tf.initialize_all_variables()
 
         sess.run(init)
@@ -474,7 +429,7 @@ def main():
                                                      network_manager.get_expected_out(): batch_original,
                                                      })
                 if i % 100 == 0:
-                    print("epoch :", j, "|", str((float(i)*100)/10000)+" %")
+                    print("epoch :" + str(i))
                     print("loss: " + str(loss))
                     tend = datetime.now()
                     if tstart is None:

@@ -10,6 +10,7 @@ from prepare_dataset.img_ds_manage import ImageDSManage
 
 from datetime import datetime
 
+from prepare_dataset.split_dataset import SplitData
 
 
 def log10(x):
@@ -295,12 +296,17 @@ class SRNetworkManager:
         current_flag = SRNetworkManager.TRANSFORM_RESTRAIN_ERROR + "_" + error_loss_flag
 
         if current_flag not in self.__loss_network or reset or deep_reset:
-            prevent_learning_input = tf.abs(tf.subtract(self.__network_expected_out, self.__network_input))
-            prevent_learning_input = tf.subtract(prevent_learning_input,
-                                                 tf.abs(tf.subtract(self.get_last_layer(), self.__network_input)))
-            prevent_learning_input = tf.reduce_mean(tf.square(prevent_learning_input))
 
-            error_loss = tf.add(error_loss, prevent_learning_input)
+            temp1 = tf.abs(tf.subtract(self.__network_expected_out, self.__network_input))
+
+
+            temp2 = tf.abs(tf.subtract(self.get_last_layer(), self.__network_input))
+            prevent_learning_input = tf.subtract(tf.multiply(100.0,temp1),
+                                                 tf.multiply(100.0,temp2))
+            prevent_learning_input = tf.multiply(-20.0, tf.log(tf.divide(1,
+                                            tf.reduce_mean( tf.abs(prevent_learning_input) ) )) )
+
+            error_loss = prevent_learning_input # tf.add(error_loss, prevent_learning_input, name="transform_restrain_error_psnr")
 
             self.__loss_network[current_flag] = error_loss
             return True
@@ -327,6 +333,9 @@ class SRNetworkManager:
 
     def get_filters(self):
         return self.__filters
+
+    def get_biases(self):
+        return self.__biases
 
     @staticmethod
     def generate_strides_one(size):
@@ -358,7 +367,10 @@ class SRNetworkManager:
 
 def main():
     img_manager = ImageDSManage(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
-                                image_buffer_limit=100, buffer_priority=100)
+                                image_buffer_limit=10, buffer_priority=1)
+
+    img_manager_train = SplitData(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
+                                image_buffer_limit=10, data_set_size=17)
 
     weights_file_name = "w"
 
@@ -387,7 +399,10 @@ def main():
 
     network_manager.construct_layers()
 
+    #network_loss = network_manager.get_psnr_network_loss()
+
     network_loss = network_manager.get_input_transform_restrain_loss()
+
 
     adam_optimizer = network_manager.get_adam_loss_optimizer(network_loss)
 
@@ -400,14 +415,14 @@ def main():
 
         sess.graph.finalize()
 
-        for j in range(100):
+        for j in range(10000):
 
             print("Count: " + str(j))
 
-            min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
-                                                                                     down_sample_factor=4,
-                                                                                     min_x_f=70,
-                                                                                     min_y_f=70)
+            #min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
+            #                                                                         down_sample_factor=4,
+            #                                                                         min_x_f=70,
+            #                                                                         min_y_f=70)
 
             # for i in range(len(batch_original)):
             #    batch_original[i] = cv2.resize(batch_original[i], dsize=(52, 52))
@@ -416,30 +431,68 @@ def main():
 
             # batch_down_sampled.fill(1.0)
             tstart = None
-            for i in range(10000):
-                # for j in range(10):
+            from utils import check_size
+            from multiprocessing import Pool, Process, Pipe, Queue
+            import copy
 
-                min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
-                                                                                         down_sample_factor=4,
-                                                                                         min_x_f=70,
-                                                                                         min_y_f=70)
+            q = Queue()
 
-                minimize, loss = sess.run(fetches=[adam_optimizer, network_loss],
-                                          feed_dict={network_manager.get_input(): batch_down_sampled,
-                                                     network_manager.get_expected_out(): batch_original,
-                                                     })
-                if i % 100 == 0:
-                    print("epoch :" + str(i))
-                    print("loss: " + str(loss))
-                    tend = datetime.now()
-                    if tstart is None:
-                        tstart = tend
-                    print ("Time = " + str(tend - tstart))
-                    tstart = datetime.now()
+            def fnc(q, img_manager_train):
 
-            for i in range(1):
+                img_manager_train.acquire_and_hold_dataset(batch_size=6,
+                                                 down_sample_factor=4,
+                                                 min_x_f=70,
+                                                 min_y_f=70)
+                q.put(img_manager_train)
+                print(q.get())
+                #x = input()
+
+            p = Process(target=fnc, args=(q,img_manager_train,))
+            p.start()
+            # print(parent_conn.recv())  # prints "[42, None, 'hello']"
+            img_manager_train = copy.deepcopy(q.get())
+            q.put("Success!")
+            p.join()
+
+            j = 0
+            # del img_manager_train
+            # del img_manager
+
+            # while True:
+            #     pass
+
+
+            for i in range(1000):
+                img_manager_train.reset_training_iter()
+                while img_manager_train.check_train_data_iter_validity():
+                    # for j in range(10):
+
+                    min_x, min_y, batch_down_sampled, batch_original = img_manager_train.get_train_data()
+
+                    minimize, loss = sess.run(fetches=[adam_optimizer, network_loss],
+                                              feed_dict={network_manager.get_input(): batch_down_sampled,
+                                                         network_manager.get_expected_out(): batch_original,
+                                                         })
+
+                    img_manager_train.get_next_training_data()
+                    j += 1
+
+
+                print("epoch :" + str(i))
+                print("loss: " + str(loss))
+                print("j = " + str(j))
+                tend = datetime.now()
+                if tstart is None:
+                    tstart = tend
+                print("Time = " + str(tend - tstart))
+                tstart = datetime.now()
+
+            #dummy = input()
+
+
+            for i in range(6):
                 # min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=1, down_sample_factor=10,
-                #                                                                     min_x_f=400, min_y_f=400 )
+                #                                                                min_x_f=400, min_y_f=400 )
 
                 computed_image = sess.run(fetches=[network_manager.get_or_init_network_output()],
                                           feed_dict={network_manager.get_input(): batch_down_sampled})
@@ -450,11 +503,12 @@ def main():
                 print(len(computed_image[0][0][0]))
                 print(len(computed_image[0][0][0][0]))
 
-                #cv2.imshow("original" + str(i) + "_" + str(j), batch_original[i])
-                #cv2.imshow("down_sampled" + str(i) + "_" + str(j), batch_down_sampled[i])
-                #cv2.imshow("computed" + str(i) + "_" + str(j), computed_image[0][i])
+                cv2.imshow("original" + str(i) + "_" + str(j), batch_original[i])
+                cv2.imshow("down_sampled" + str(i) + "_" + str(j), batch_down_sampled[i])
+                cv2.imshow("computed" + str(i) + "_" + str(j), computed_image[0][i])
 
-            #cv2.waitKey(0)
+            cv2.waitKey(0)
+
 
             computed_image = None
 
