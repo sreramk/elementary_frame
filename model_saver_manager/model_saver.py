@@ -560,21 +560,21 @@ class ModelSaver:
             end = checkpoint_range[1]
 
             if left_range == ModelSaver.CLOSED and right_range == ModelSaver.CLOSED:
-                def compare(beg, val, end):
+                def compare_indx(beg, val, end):
                     return beg <= val <= end
             elif left_range == ModelSaver.CLOSED and right_range == ModelSaver.OPEN:
-                def compare(beg, val, end):
+                def compare_indx(beg, val, end):
                     return beg <= val < end
             elif left_range == ModelSaver.OPEN and right_range == ModelSaver.CLOSED:
-                def compare(beg, val, end):
+                def compare_indx(beg, val, end):
                     return beg < val <= end
             elif left_range == ModelSaver.OPEN and right_range == ModelSaver.OPEN:
-                def compare(beg, val, end):
+                def compare_indx(beg, val, end):
                     return beg < val < end
             else:
                 raise InvalidLeftRightArgumentCombination
 
-            return beg, end, compare
+            return beg, end, compare_indx
 
         def save_to_result(checkpoint_id):
             temp = copy.deepcopy(checkpoint_store[checkpoint_id])
@@ -583,7 +583,7 @@ class ModelSaver:
 
         def range_match_store(checkpoint_range, key=None):
             store_iterator = iter(checkpoint_store)
-            beg, end, compare = compute_beg_end(checkpoint_range)
+            beg, end, compare_indx = compute_beg_end(checkpoint_range)
 
             if key is None:
                 def default_key(val):
@@ -601,7 +601,7 @@ class ModelSaver:
                 if value > end:
                     break
 
-                if compare(beg, value, end):
+                if compare_indx(beg, value, end):
                     save_to_result(rec_id)
 
         if field_name == 'check_point_id_range':
