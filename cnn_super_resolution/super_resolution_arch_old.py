@@ -5,7 +5,7 @@ import os
 
 import tensorflow as tf
 
-from prepare_dataset.img_ds_manage import ImageDSManage
+from prepare_dataset.sr_image_ds_manager import ImageDSManage
 
 
 from datetime import datetime

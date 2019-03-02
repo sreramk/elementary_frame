@@ -4,7 +4,7 @@ import os
 
 import tensorflow as tf
 
-from prepare_dataset.img_ds_manage import ImageDSManage
+from prepare_dataset.sr_image_ds_manager import ImageDSManage
 
 from datetime import datetime
 
@@ -280,7 +280,7 @@ def trainer(loss_num, batch_down_sampled, batch_original, name="1"):
 
 
 if __name__ == "__main__":
-    img_manager = ImageDSManage(["/home/sreramk/PycharmProjects/neuralwithtensorgpu/dataset/DIV2K_train_HR/"],
+    img_manager = ImageDSManage(["/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_train_HR/"],
                                 image_buffer_limit=10, buffer_priority=1)
     min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
                                                                              down_sample_factor=4,

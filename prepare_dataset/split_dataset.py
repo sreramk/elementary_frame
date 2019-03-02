@@ -1,5 +1,5 @@
 # copyright (c) 2019 K Sreram, All rights reserved.
-from prepare_dataset.img_ds_manage import ImageDSManage
+from prepare_dataset.sr_image_ds_manager import ImageDSManage
 from utils import check_size
 
 
