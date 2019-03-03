@@ -73,6 +73,9 @@ class ImageDSManage:
     def get_accepted_ext_list(self):
         return self.__accepted_ext.copy()
 
+    def is_down_sampled_img_buffer_full(self):
+        return len(self.__down_sampled_img_cache) >= self.__image_buffer_limit
+
     def __cache_down_sampled_img(self, directory, img):
         """
         A cache for downsampled images which ensures that the added image is always added to
@@ -86,7 +89,7 @@ class ImageDSManage:
 
         img = ImageDSManage.ensure_numpy_array(img)
 
-        if len(self.__down_sampled_img_cache) >= self.__image_buffer_limit:
+        if self.is_down_sampled_img_buffer_full(): # len(self.__down_sampled_img_cache) >= self.__image_buffer_limit:
             del_key = next(iter(self.__down_sampled_img_cache))
             del self.__down_sampled_img_cache[del_key]
 
@@ -109,6 +112,9 @@ class ImageDSManage:
             self.__down_sampled_img_cache[directory] = result
             return result
 
+    def is_main_image_buffer_full(self):
+        return  len(self.__main_img_cache) >= self.__image_buffer_limit
+
     def __cache_main_image(self, directory, img):
         """
         A cache for images ensures that the added image is always added to the very
@@ -120,7 +126,7 @@ class ImageDSManage:
         :return:
         """
         img = ImageDSManage.ensure_numpy_array(img)
-        if len(self.__main_img_cache) >= self.__image_buffer_limit:
+        if self.is_main_image_buffer_full(): #len(self.__main_img_cache) >= self.__image_buffer_limit:
             del_key = next(iter(self.__main_img_cache))
             del self.__main_img_cache[del_key]
             self.__main_cache_rand.delete_element(del_key)
@@ -213,7 +219,7 @@ class ImageDSManage:
             del self.__main_img_cache[next(iter(self.__main_img_cache))]
 
     @staticmethod
-    def __crop_img(image, size_x, size_y, pos_x, pos_y):
+    def crop_img(image, size_x, size_y, pos_x, pos_y):
         start_x = pos_x
         start_y = pos_y
         end_x = size_x + start_x
@@ -221,7 +227,7 @@ class ImageDSManage:
         return ImageDSManage.ensure_numpy_array(image[start_y:end_y, start_x:end_x])
 
     @staticmethod
-    def __random_crop(image, size_x, size_y):
+    def random_crop(image, size_x, size_y):
 
         delta_x = len(image[0]) - size_x
         start_x = 0
@@ -238,10 +244,11 @@ class ImageDSManage:
 
         return start_x, start_y, ImageDSManage.ensure_numpy_array(image[start_y:end_y, start_x:end_x])
 
-    def __choose_dir(self):
+    def __choose_dir(self, rand_choose_ds=None, rand_choose_buf=None):
 
-        rand_choose_ds = random.random()
-        rand_choose_buf = random.random() * self.__buffer_priority
+        if rand_choose_ds is None or rand_choose_buf is None:
+            rand_choose_ds = random.random()
+            rand_choose_buf = random.random() * self.__buffer_priority
 
         if rand_choose_buf > rand_choose_ds and len(self.__main_cache_rand) > 0:
             rand_dir = self.__main_cache_rand.random_key()
@@ -256,6 +263,21 @@ class ImageDSManage:
 
     def get_buffer_priority(self):
         return self.__buffer_priority
+
+    def fill_buffer(self, down_sample_factor, iter_limit=None):
+        if iter_limit is None:
+            iter_limit = self.__image_buffer_limit * 2
+
+        count = 0
+        while (not self.is_down_sampled_img_buffer_full() and not self.is_main_image_buffer_full()) and\
+                (count < iter_limit):
+
+            directory = self.__choose_dir(rand_choose_ds=1, rand_choose_buf=0)
+            self.__load_main_image(directory)
+
+            # reducing the information contained in the image
+            self.__load_or_create_down_sampled_img(directory, down_sample_factor)
+            count += 1
 
     def get_batch(self, batch_size, down_sample_factor, min_x_f=None, min_y_f=None):
 
@@ -292,8 +314,8 @@ class ImageDSManage:
                 min_y = min_y_f
 
         for i in range(batch_size):
-            pos_x, pos_y, batch_down_sampled[i] = ImageDSManage.__random_crop(batch_down_sampled[i], min_x, min_y)
-            batch_original[i] = ImageDSManage.__crop_img(batch_original[i], min_x, min_y, pos_x, pos_y)
+            pos_x, pos_y, batch_down_sampled[i] = ImageDSManage.random_crop(batch_down_sampled[i], min_x, min_y)
+            batch_original[i] = ImageDSManage.crop_img(batch_original[i], min_x, min_y, pos_x, pos_y)
 
         return min_x, min_y, ImageDSManage.ensure_numpy_array(batch_down_sampled), \
                ImageDSManage.ensure_numpy_array(batch_original)

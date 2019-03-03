@@ -139,3 +139,10 @@ class InvalidArgumentCombination(ModelDerivedClassExceptions):
     None, then this exception will most likely be raised.
     """
     pass
+
+
+class InvalidType(ModelDerivedClassExceptions):
+    """
+    Raised when the given type differs from the expected type
+    """
+    pass

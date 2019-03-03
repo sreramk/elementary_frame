@@ -91,12 +91,10 @@ class SRModelPSNR(ModelBase):
     @staticmethod
     def zoom_image(img, zoom_factor_x=1.0, zoom_factor_y=1.0):
         result = cv2.resize(img,
-                          dsize=(int(len(img[0]) * zoom_factor_x),
-                                 int(len(img) * zoom_factor_y)),
-                          interpolation=cv2.INTER_NEAREST)
+                            dsize=(int(len(img[0]) * zoom_factor_x),
+                                   int(len(img) * zoom_factor_y)),
+                            interpolation=cv2.INTER_NEAREST)
         return ImageDSManage.ensure_numpy_array(result)
-
-
 
     def __create_place_holders(self):
         self.__input_data = tf.placeholder(dtype=tf.float32, shape=[None, None, None, None])
@@ -222,32 +220,34 @@ class SRModelPSNR(ModelBase):
             raise InvalidType
         self.__model_saver_inst = model_saver_inst
 
-    def prepare_train_test_dataset(self, train_dataset_path, test_dataset_path,
+    def prepare_train_test_dataset(self, train_dataset_path, test_dataset_path, down_sample_factor,
                                    image_buffer_limit_train=int(50 * 0.8), image_buffer_limit_test=int(50 * 0.2)):
         self.__train_ds_manage = ImageDSManage(train_dataset_path,
-                                               image_buffer_limit=image_buffer_limit_train, buffer_priority=0.01,
-                                               buffer_priority_acceleration=0.01,
-                                               buffer_priority_cap=1000)
+                                               image_buffer_limit=image_buffer_limit_train, buffer_priority=100)
 
         self.__test_ds_manage = ImageDSManage(test_dataset_path,
-                                              image_buffer_limit=image_buffer_limit_test, buffer_priority=0.01,
-                                              buffer_priority_acceleration=0.01,
-                                              buffer_priority_cap=1000)
+                                              image_buffer_limit=image_buffer_limit_test, buffer_priority=100)
+
+        self.__train_ds_manage.fill_buffer(down_sample_factor)
+        self.__test_ds_manage.fill_buffer(down_sample_factor)
 
     def run_train(self,
                   # parameters for train:
                   num_of_epochs=10, single_epoch_count=12010, checkpoint_iteration_count=3000,
-                  display_status=True, display_status_iter=100, batch_size=6, down_sample_factor=4,
+                  display_status=True, display_status_iter=100, batch_size=10, down_sample_factor=4,
                   min_x_f=100, min_y_f=100,
 
                   # parameters for test:
                   terminal_loss=0.00001, test_min_x_f=500, test_min_y_f=500, number_of_samples=int(50 * 0.2),
-                  run_test_periodically=3000, execute_tests=True,
+                  run_test_periodically=3000, break_samples_by=int(50 * 0.2),
+                  execute_tests=True,
 
                   # parameters for checkpoint:
                   save_checkpoints=True):
         """
 
+        :param fill_ds_buffer:
+        :param break_samples_by:
         :param test_min_y_f:
         :param test_min_x_f:
         :param number_of_samples:
@@ -296,13 +296,27 @@ class SRModelPSNR(ModelBase):
                 total_iterations = num_of_epochs * single_epoch_count
 
                 def get_train_loss():
+                    result_ = self.__train_ds_manage.get_batch(batch_size=batch_size,
+                                                               down_sample_factor=down_sample_factor,
+                                                               min_x_f=min_x_f,
+                                                               min_y_f=min_y_f)
+
+                    min_x_, min_y_, batch_down_sampled_, batch_original_ = result_
+
                     return sess.run(fetches=[train_loss],
-                                    feed_dict={self.__get_input_data_placeholder(): batch_down_sampled,
-                                               self.__get_expected_output_placeholder(): batch_original})
+                                    feed_dict={self.__get_input_data_placeholder(): batch_down_sampled_,
+                                               self.__get_expected_output_placeholder(): batch_original_})
 
                 for epoch in range(num_of_epochs):
 
                     for i in range(single_epoch_count):
+
+                        if save_checkpoints:
+                            cur_train_loss = get_train_loss()
+                            self.__model_saver_inst.checkpoint_model(float(cur_train_loss[0]), sess=sess,
+                                                                     skip_type=ModelSaver.TimeIterSkipManager.ST_ITER_SKIP,
+                                                                     skip_duration=checkpoint_iteration_count,
+                                                                     exec_on_checkpoint=print_checkpoint)
 
                         result = self.__train_ds_manage.get_batch(batch_size=batch_size,
                                                                   down_sample_factor=down_sample_factor,
@@ -319,21 +333,15 @@ class SRModelPSNR(ModelBase):
 
                         if display_status and iteration_count % display_status_iter == 0:
                             cur_train_loss = get_train_loss()
-                            print("Epoch: %d, epoch train percentage : %.3f, "
-                                  "total train percentage : %.3f training loss: %f" %
-                                  (epoch, ((float(i) / single_epoch_count) * 100),
+                            print("Epoch: %d, iteration count: %d, epoch train percentage : %.3f%%, "
+                                  "total train percentage : %.3f%%,  training loss: %f" %
+                                  (epoch, iteration_count, ((float(i) / single_epoch_count) * 100),
                                    ((float(iteration_count) / total_iterations) * 100), cur_train_loss[0]))
 
-                        if save_checkpoints:
-                            cur_train_loss = get_train_loss()
-                            self.__model_saver_inst.checkpoint_model(float(cur_train_loss[0]), sess=sess,
-                                                                     skip_type=ModelSaver.TimeIterSkipManager.ST_ITER_SKIP,
-                                                                     skip_duration=checkpoint_iteration_count,
-                                                                     exec_on_checkpoint=print_checkpoint)
                         if execute_tests and iteration_count % run_test_periodically == 0:
                             cur_test_loss = \
                                 self.run_test(test_min_x_f, test_min_y_f, number_of_samples, sess, down_sample_factor,
-                                              display_status)
+                                              display_status, break_samples_by)
 
                             if cur_test_loss[0] < terminal_loss:
                                 return
@@ -343,7 +351,7 @@ class SRModelPSNR(ModelBase):
                     # display at the end of epoch, if not displayed
                     if display_status and iteration_count % display_status_iter != 0:
                         cur_train_loss = get_train_loss()
-                        print("Epoch: %d, total train percentage : %.3f, training loss: %f" %
+                        print("Epoch: %d, total train percentage : %.3f%%, training loss: %f" %
                               (epoch, ((float(iteration_count) / total_iterations) * 100), cur_train_loss[0]))
 
         execute_all_epoch()
@@ -351,12 +359,13 @@ class SRModelPSNR(ModelBase):
             print("Final loss:")
             with tf.Session() as sess:
                 self.run_test(test_min_x_f, test_min_y_f, number_of_samples, sess, down_sample_factor,
-                              display_status)
+                              display_status, break_samples_by)
 
     def run_test(self, min_x_f=500, min_y_f=500, number_of_samples=int(50 * 0.2), sess=None, down_sample_factor=4,
                  display_status=True, break_samples_by=int(50 * 0.2)):
         """
 
+        :param fill_ds_buffer:
         :param break_samples_by:
         :param display_status:
         :param down_sample_factor:
@@ -483,7 +492,8 @@ if __name__ == "__main__":
 
         model_instance.prepare_train_test_dataset(
             ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_train_HR/'],
-            ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/']
+            ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/'],
+            down_sample_factor=4
         )
 
         model_instance.set_rms_loss()
@@ -507,5 +517,6 @@ if __name__ == "__main__":
             cv2.destroyAllWindows()
 
             img = result
+
 
     main_fnc()
