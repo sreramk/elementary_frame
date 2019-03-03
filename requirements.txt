@@ -1,3 +1,5 @@
+matplotlib
+scipy
 tensorflow
 absl-py==0.7.0
 astor==0.7.1

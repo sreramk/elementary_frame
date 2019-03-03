@@ -486,7 +486,9 @@ class ModelSaver:
     def checkpoint_model(self, checkpoint_efficiency, skip_type=TimeIterSkipManager.ST_ITER_SKIP,
                          skip_duration=TimeIterSkipManager.DEFAULT_SKIP,
                          checkpoint_type=DYNAMIC_CHECKPOINT,
-                         checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT), reset=False, **args):
+                         checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT), reset=False,
+                         exec_on_checkpoint=None,
+                         **args):
         """
         This is called periodically to actually checkpoint the model's state
         :return:
@@ -499,6 +501,8 @@ class ModelSaver:
         if self.__time_iter_skip.check_execute_checkpoint():
             self.create_check_point(checkpoint_efficiency=checkpoint_efficiency, checkpoint_type=checkpoint_type,
                                     checkpoint_id=checkpoint_id, **args)
+            if exec_on_checkpoint is not None:
+                exec_on_checkpoint()
 
     def query_get_last_record(self):
         checkpoint_store = self.__header[ModelSaver.H_CHECK_POINT_STORE]

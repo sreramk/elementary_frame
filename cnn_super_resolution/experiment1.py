@@ -11,6 +11,28 @@ from datetime import datetime
 from prepare_dataset.split_dataset import SplitData
 
 from model_saver_manager import model_saver
+import numpy
+import matplotlib.pyplot as plt
+
+
+def display_image(img, black_and_white=False):
+    if black_and_white:
+        temp = []
+        for i in range(len(img)):
+            temp.append([])
+            for j in range(len(img[0])):
+                temp[i].append([img[i][j], img[i][j], img[i][j]])
+        img = numpy.array(temp)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        plt.figure()
+        plt.imshow(img, cmap='gray')
+    else:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        plt.figure()
+        plt.imshow(img)
+    plt.colorbar()
+    plt.grid(False)
+    plt.show()
 
 
 class Model1:
@@ -176,7 +198,8 @@ class Model2:
 
 def trainer(loss_num, batch_down_sampled, batch_original, name="1"):
     img_manager = ImageDSManage(["/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_train_HR/"],
-                                image_buffer_limit=50, buffer_priority=50)
+                                image_buffer_limit=50, buffer_priority=0.01, buffer_priority_acceleration=0.01,
+                                buffer_priority_cap=1000)
 
     # input_data = tf.placeholder(dtype=tf.float32, shape=[None, None, None, None])
     # expected_output_data = tf.placeholder(dtype=tf.float32, shape=[None, None, None, None])
@@ -204,10 +227,10 @@ def trainer(loss_num, batch_down_sampled, batch_original, name="1"):
     parameters = list(filters)
     parameters.extend(bisases)
 
-    modelsave = model_saver.ModelSaver('exp1_',parameters,
-                    save_file_path="/media/sreramk/storage-main/elementary_frame/model_checkpoints")
+    modelsave = model_saver.ModelSaver('exp1_', parameters,
+                                       save_file_path="/media/sreramk/storage-main/elementary_frame/model_checkpoints")
     query = modelsave.query_checkpoint_info(check_point_id_range=(0, 100))
-    print (query)
+    print(query)
     model = model2.create_model()
 
     if loss_num == 1:
@@ -231,29 +254,31 @@ def trainer(loss_num, batch_down_sampled, batch_original, name="1"):
         sess.run(init)
 
         # sess.graph.finalize()
-
+        display_image(batch_original[0])
+        display_image(batch_down_sampled[0])
         cv2.imshow("_original" + name, batch_original[0])
         cv2.imshow("_down_sampled" + name, batch_down_sampled[0])
         cv2.waitKey(0)
         # cv2.destroyAllWindows()
         first_time = True
-        for i in range(12020):
+        for i in range(1):
 
             min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
                                                                                      down_sample_factor=4,
-                                                                                     min_x_f=70, min_y_f=70)
+                                                                                     min_x_f=100, min_y_f=100)
+            img_manager.acceleration_step()
 
-            lresult = sess.run(fetches=[adam, loss, model],
+            lresult = sess.run(fetches=[adam, loss],
                                feed_dict={input_data: batch_down_sampled,
                                           expected_output_data: batch_original})
 
-            __, cur_loss, cur_output_img = lresult
+            __, cur_loss = lresult
 
             if first_time:
                 print(sess.run(fetches=parameters))
 
             modelsave.checkpoint_model(float(cur_loss), sess=sess, skip_type=modelsave.TimeIterSkipManager.ST_ITER_SKIP,
-                                       skip_duration=50)
+                                       skip_duration=3000)
             if first_time:
                 print("#####################################")
                 print(print(sess.run(fetches=parameters)))
@@ -263,6 +288,7 @@ def trainer(loss_num, batch_down_sampled, batch_original, name="1"):
                 # print(lresult)
                 print("loss = " + str(cur_loss))
                 print("i = " + str(i))
+                print("Buffer priority = " + str(img_manager.get_buffer_priority()))
 
         min_x, min_y, batch_down_sampled, batch_original = img_manager.get_batch(batch_size=6,
                                                                                  down_sample_factor=4,
