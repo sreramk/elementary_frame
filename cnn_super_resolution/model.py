@@ -265,12 +265,15 @@ class SRModel(ModelBase):
         self.__model_saver_inst = model_saver_inst
 
     def prepare_train_test_dataset(self, train_dataset_path, test_dataset_path, down_sample_factor,
-                                   image_buffer_limit_train=int(100 * 0.8), image_buffer_limit_test=int(100 * 0.2)):
+                                   image_buffer_limit_train=int(100 * 0.8), image_buffer_limit_test=int(100 * 0.2),
+                                   buffer_priority=1000):
         self.__train_ds_manage = ImageDSManage(train_dataset_path,
-                                               image_buffer_limit=image_buffer_limit_train, buffer_priority=100)
+                                               image_buffer_limit=image_buffer_limit_train,
+                                               buffer_priority=buffer_priority)
 
         self.__test_ds_manage = ImageDSManage(test_dataset_path,
-                                              image_buffer_limit=image_buffer_limit_test, buffer_priority=100)
+                                              image_buffer_limit=image_buffer_limit_test,
+                                              buffer_priority=buffer_priority)
 
         self.__train_ds_manage.fill_buffer(down_sample_factor)
         self.__test_ds_manage.fill_buffer(down_sample_factor)
@@ -556,7 +559,7 @@ if __name__ == "__main__":
             _, __, img = ImageDSManage.random_crop(img, 250, 250)
             img = model_instance.zoom_image(img, 4, 4)
             cv2.imshow("im1", img)
-            model_instance.display_image(img)
+            # model_instance.display_image(img)
             result = model_instance.execute_model(input_image=img, return_with_batch_column=False)
             # print(result)
             # model_instance.display_image(result)
