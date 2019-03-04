@@ -14,27 +14,6 @@ class ModelBase:
     def __init__(self):
         pass
 
-    @staticmethod
-    def display_image(img, black_and_white=False):
-
-        if black_and_white:
-            temp = []
-            for i in range(len(img)):
-                temp.append([])
-                for j in range(len(img[0])):
-                    temp[i].append([img[i][j], img[i][j], img[i][j]])
-            img = numpy.array(temp)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            plt.figure()
-            plt.imshow(img, cmap='gray')
-        else:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            plt.figure()
-            plt.imshow(img)
-        plt.colorbar()
-        plt.grid(False)
-        plt.show()
-
     def set_model_saver_inst(self, **args):
         """
         This must be overridden to accept a model saver instance.

@@ -58,6 +58,10 @@ class ImageDSManage:
             self.__image_dir_list.extend(list(new_dirs))
 
     @staticmethod
+    def check_if_numpy_array(img):
+        return type(img) is numpy.ndarray
+
+    @staticmethod
     def ensure_numpy_array(img):
         if type(img) is not numpy.ndarray:
             return numpy.array(img)

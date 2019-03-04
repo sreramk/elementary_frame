@@ -1,10 +1,11 @@
 # copyright (c) 2019 K Sreram, All rights reserved.
 from os import listdir
 from os.path import isfile, join
-
+import urllib.parse
 import cv2
 import os
-
+import matplotlib.pyplot as plt
+from skimage import io
 import numpy
 
 from prepare_dataset.sr_image_ds_manager import ImageDSManage
@@ -16,7 +17,7 @@ import tensorflow as tf
 from model_saver_manager import model_saver
 
 
-class SRModelPSNR(ModelBase):
+class SRModel(ModelBase):
     RMS_TRIPLET_LOSS = "rms_triplet_loss"
     RMS_LOSS = "rms_loss"
 
@@ -45,7 +46,7 @@ class SRModelPSNR(ModelBase):
 
         self.__rms_loss = None
 
-        self.__active_loss = SRModelPSNR.RMS_TRIPLET_LOSS
+        self.__active_loss = SRModel.RMS_TRIPLET_LOSS
 
         self.__padding = "SAME"
 
@@ -66,9 +67,38 @@ class SRModelPSNR(ModelBase):
         super().__init__()
 
     @staticmethod
+    def display_image(img, black_and_white=False):
+
+        if black_and_white:
+            temp = []
+            for i in range(len(img)):
+                temp.append([])
+                for j in range(len(img[0])):
+                    temp[i].append([img[i][j], img[i][j], img[i][j]])
+            img = numpy.array(temp)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            plt.figure()
+            plt.imshow(img, cmap='gray')
+        else:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            plt.figure()
+            plt.imshow(img)
+        plt.colorbar()
+        plt.grid(False)
+        plt.show()
+
+    @staticmethod
+    def is_url(url):
+        return urllib.parse.urlparse(url).scheme != ""
+
+    @staticmethod
     def fetch_image(input_image_path, with_batch_column=True):
 
-        input_image = cv2.imread(input_image_path)
+        if SRModel.is_url(input_image_path):
+            input_image = io.imread(input_image_path)
+        else:
+            input_image = cv2.imread(input_image_path)
+
         input_image = numpy.float32(input_image) / 255.0
 
         input_image = ImageDSManage.ensure_numpy_array(input_image)
@@ -79,6 +109,13 @@ class SRModelPSNR(ModelBase):
         input_image = ImageDSManage.ensure_numpy_array(input_image)
 
         return input_image
+
+    @staticmethod
+    def get_image_dimensions(img):
+        if ImageDSManage.check_if_numpy_array(img):
+            size_y = len(img)
+            size_x = len(img[0])
+            return size_x, size_y
 
     @staticmethod
     def save_image(img, name):
@@ -201,16 +238,16 @@ class SRModelPSNR(ModelBase):
         return self.__adam_rms_triplet
 
     def set_rms_triplet_loss(self):
-        self.__active_loss = SRModelPSNR.RMS_TRIPLET_LOSS
+        self.__active_loss = SRModel.RMS_TRIPLET_LOSS
 
     def set_rms_loss(self):
-        self.__active_loss = SRModelPSNR.RMS_LOSS
+        self.__active_loss = SRModel.RMS_LOSS
 
     def is_rms_triplet_loss_active(self):
-        return self.__active_loss == SRModelPSNR.RMS_TRIPLET_LOSS
+        return self.__active_loss == SRModel.RMS_TRIPLET_LOSS
 
     def is_rms_loss_active(self):
-        return self.__active_loss == SRModelPSNR.RMS_LOSS
+        return self.__active_loss == SRModel.RMS_LOSS
 
     def get_active_loss(self):
         return self.__active_loss
@@ -485,7 +522,7 @@ if __name__ == "__main__":
     def main_fnc():
         input()
 
-        model_instance = SRModelPSNR()
+        model_instance = SRModel()
         parameters = model_instance.get_parameter_tensors()
 
         modelsave = model_saver.ModelSaver(
@@ -521,6 +558,10 @@ if __name__ == "__main__":
             cv2.destroyAllWindows()
 
             img = result
+
+        img = model_instance.fetch_image("https://cdn.insidetheperimeter.ca/wp-content/uploads/2015/11/Albert_einstein_by_zuzahin-d5pcbug-WikiCommons-768x706.jpg")
+        size_x, size_y = model_instance.get_image_dimensions(img)
+        
 
 
     main_fnc()
