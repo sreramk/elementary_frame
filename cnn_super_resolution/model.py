@@ -221,7 +221,7 @@ class SRModelPSNR(ModelBase):
         self.__model_saver_inst = model_saver_inst
 
     def prepare_train_test_dataset(self, train_dataset_path, test_dataset_path, down_sample_factor,
-                                   image_buffer_limit_train=int(50 * 0.8), image_buffer_limit_test=int(50 * 0.2)):
+                                   image_buffer_limit_train=int(100 * 0.8), image_buffer_limit_test=int(100 * 0.2)):
         self.__train_ds_manage = ImageDSManage(train_dataset_path,
                                                image_buffer_limit=image_buffer_limit_train, buffer_priority=100)
 
@@ -231,6 +231,21 @@ class SRModelPSNR(ModelBase):
         self.__train_ds_manage.fill_buffer(down_sample_factor)
         self.__test_ds_manage.fill_buffer(down_sample_factor)
 
+    def __get_active_optimizer(self):
+        if self.is_rms_loss_active():
+            optimizer = self.__get_rms_loss_adam_opt()
+        else:
+            optimizer = self.__get_rms_triplet_loss_adam_opt()
+
+        return optimizer
+
+    def __get_active_loss(self):
+        if self.is_rms_loss_active():
+            loss = self.__get_rms_loss()
+        else:
+            loss = self.__get_rms_triplet_loss()
+        return loss
+
     def run_train(self,
                   # parameters for train:
                   num_of_epochs=10, single_epoch_count=12010, checkpoint_iteration_count=3000,
@@ -238,15 +253,14 @@ class SRModelPSNR(ModelBase):
                   min_x_f=100, min_y_f=100,
 
                   # parameters for test:
-                  terminal_loss=0.00001, test_min_x_f=500, test_min_y_f=500, number_of_samples=int(50 * 0.2),
-                  run_test_periodically=3000, break_samples_by=int(50 * 0.2),
+                  terminal_loss=0.00001, test_min_x_f=500, test_min_y_f=500, number_of_samples=int(100),
+                  run_test_periodically=3000, break_samples_by=int(10),
                   execute_tests=True,
 
                   # parameters for checkpoint:
                   save_checkpoints=True):
         """
 
-        :param fill_ds_buffer:
         :param break_samples_by:
         :param test_min_y_f:
         :param test_min_x_f:
@@ -273,15 +287,8 @@ class SRModelPSNR(ModelBase):
         if save_checkpoints and not isinstance(self.__model_saver_inst, model_saver.ModelSaver):
             raise SaveInstanceNotInitialized
 
-        if self.is_rms_loss_active():
-            optimizer = self.__get_rms_loss_adam_opt()
-        else:
-            optimizer = self.__get_rms_triplet_loss_adam_opt()
-
-        if self.is_rms_loss_active():
-            train_loss = self.__get_rms_loss()
-        else:
-            train_loss = self.__get_rms_triplet_loss()
+        optimizer = self.__get_active_optimizer()
+        train_loss = self.__get_active_loss()
 
         def print_checkpoint():
             print("Checkpoint committed")
@@ -382,10 +389,7 @@ class SRModelPSNR(ModelBase):
             # used for reloading the trained parameters. It doesn't make sense to run this on random parameters.
             raise SaveInstanceNotInitialized
 
-        if self.is_rms_loss_active():
-            test_loss = self.__get_rms_loss()
-        else:
-            test_loss = self.__get_rms_triplet_loss()
+        test_loss = self.__get_active_loss()
 
         session_is_parent = True if sess is not None else False
 
@@ -498,7 +502,7 @@ if __name__ == "__main__":
 
         model_instance.set_rms_loss()
         model_instance.run_test(number_of_samples=32)
-        print(model_instance.get_active_loss())
+        print("active loss: " + model_instance.get_active_loss())
 
         img = model_instance.fetch_image('/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/0848.png',
                                          with_batch_column=False)
