@@ -67,7 +67,13 @@ class SRModel(ModelBase):
         super().__init__()
 
     @staticmethod
-    def display_image(img, black_and_white=False):
+    def display_image(img, black_and_white=False, invert_colors=False, figure_size=None):
+
+        def plt_figure():
+            if figure_size is not None:
+                plt.figure(figsize=figure_size)
+            else:
+                plt.figure()
 
         if black_and_white:
             temp = []
@@ -77,11 +83,12 @@ class SRModel(ModelBase):
                     temp[i].append([img[i][j], img[i][j], img[i][j]])
             img = numpy.array(temp)
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            plt.figure()
+            plt_figure()
             plt.imshow(img, cmap='gray')
         else:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            plt.figure()
+            if not invert_colors:
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            plt_figure()
             plt.imshow(img)
         plt.colorbar()
         plt.grid(False)
@@ -549,7 +556,7 @@ if __name__ == "__main__":
             _, __, img = ImageDSManage.random_crop(img, 250, 250)
             img = model_instance.zoom_image(img, 4, 4)
             cv2.imshow("im1", img)
-            # model_instance.display_image(img)
+            model_instance.display_image(img)
             result = model_instance.execute_model(input_image=img, return_with_batch_column=False)
             # print(result)
             # model_instance.display_image(result)
@@ -561,7 +568,7 @@ if __name__ == "__main__":
 
         img = model_instance.fetch_image("https://cdn.insidetheperimeter.ca/wp-content/uploads/2015/11/Albert_einstein_by_zuzahin-d5pcbug-WikiCommons-768x706.jpg")
         size_x, size_y = model_instance.get_image_dimensions(img)
-        
+
 
 
     main_fnc()
