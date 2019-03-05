@@ -26,6 +26,7 @@ class InvalidArgument(ModelSaverException):
     behavior.
     """
 
+
 class InvalidNumberOfArgumentsPassed(ModelSaverException):
     """
     Certain methods accept only a certain number of arguments. When such a condition is violated, this exception is
@@ -54,5 +55,12 @@ class InvalidCheckpointID(ModelSaverException):
     """
     Raised when the checkpoint used is invalid. Valid values include all the added checkpoint
     IDs if the IN_GET_METHOD flag is used. Else, the valid range includes anything from 0 to infinity.
+    """
+    pass
+
+
+class NoneValueException(ModelSaverException):
+    """
+    Raised to indicate that a particular value is None.
     """
     pass

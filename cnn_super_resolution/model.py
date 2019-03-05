@@ -411,9 +411,10 @@ class SRModel(ModelBase):
         execute_all_epoch()
         if execute_tests:
             print("Final loss:")
-            with tf.Session() as sess:
-                self.run_test(test_min_x_f, test_min_y_f, number_of_samples, sess, down_sample_factor,
-                              display_status, break_samples_by)
+            self.run_test(test_min_x_f, test_min_y_f, number_of_samples,
+                          down_sample_factor=down_sample_factor,
+                          display_status=display_status,
+                          break_samples_by=break_samples_by)
 
     def run_test(self, min_x_f=500, min_y_f=500, number_of_samples=int(50 * 0.2), sess=None, down_sample_factor=4,
                  display_status=True, break_samples_by=int(50 * 0.2)):
