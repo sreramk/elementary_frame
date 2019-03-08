@@ -446,7 +446,7 @@ class ModelSaver:
 
         if reset or checkpoint_id is None:
             self.__checkpoint_record = None
-            return None
+            return False
 
         checkpoint_addr = self.__get_checkpoint_addr(checkpoint_id)
         if os.path.isfile(self.__header_address):
@@ -458,6 +458,7 @@ class ModelSaver:
                     self.__converter_instance.set_tensors(pyprams, **args)
                 if commit:
                     self.___save_header()
+                return True
 
     def change_working_tensor_prams(self, new_tensor_prams):
         self.__converter_instance.change_tensors(new_tensor_prams)
@@ -575,14 +576,25 @@ class ModelSaver:
         """
 
         if self.__ensure_first_run() or reset:
-            checkpoint_id = self.__resolve_checkpoint_id(checkpoint_id, ModelSaver.IN_GET_METHOD)
+            checkpoint_id = self.__resolve_checkpoint_id(checkpoint_id, ModelSaver.NOT_IN_GET_METHOD)
 
-            if checkpoint_id is None:
-                # creates a checkpoint if this is the first checkpoint
-                self.create_check_point(checkpoint_efficiency=checkpoint_efficiency, checkpoint_type=checkpoint_type,
-                                        checkpoint_id=checkpoint_id, **args)
-            else:
-                self.load_checkpoint(checkpoint_id=checkpoint_id, reset=False, **args)
+            if checkpoint_type == ModelSaver.DYNAMIC_CHECKPOINT:
+                if checkpoint_id is None:
+                    # creates a checkpoint if this is the first checkpoint
+                    self.create_check_point(checkpoint_efficiency=checkpoint_efficiency, checkpoint_type=checkpoint_type,
+                                            checkpoint_id=checkpoint_id, **args)
+                else:
+                    if not self.load_checkpoint(checkpoint_id=checkpoint_id, reset=False, **args):
+                        raise InvalidCheckpointID
+
+            elif checkpoint_type == ModelSaver.STATIC_CHECKPOINT:
+                if checkpoint_id is not None:
+                    if not self.load_checkpoint(checkpoint_id=checkpoint_id, reset=False, **args):
+                        self.create_check_point(checkpoint_efficiency=checkpoint_efficiency,
+                                                checkpoint_type=checkpoint_type,
+                                                checkpoint_id=checkpoint_id, **args)
+                else:
+                    raise InvalidCheckpointID
 
             self.__time_iter_skip = ModelSaver.TimeIterSkipManager(skip_type=skip_type, skip_duration=skip_duration)
             self.__running_avg_in_checkpoint_model = RunningAvg()
