@@ -4,11 +4,16 @@
 class RunningAvg:
 
     def __init__(self):
-        self.__avg = 0.0
-        self.__count = 0
+        self.__avg = None
+        self.__count = None
+        self.reset()
 
     def get_avg(self):
         return self.__avg
+
+    def reset(self):
+        self.__avg = 0.0
+        self.__count = 0
 
     def __set_avg(self, avg):
         self.__avg = avg

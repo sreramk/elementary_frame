@@ -59,6 +59,15 @@ class InvalidCheckpointID(ModelSaverException):
     pass
 
 
+class InvalidRangeArg(ModelSaverException):
+    """
+    Raised when the range given to a function is invalid. A few functions accept a range as an input, which is a tuple
+    with the first value representing the low_range and the second value representing the high_range. This requires the
+    low_range to be lesser than the high_range. This exception is raised when this rule isn't enforced.
+    """
+    pass
+
+
 class NoneValueException(ModelSaverException):
     """
     Raised to indicate that a particular value is None.

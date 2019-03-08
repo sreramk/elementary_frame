@@ -1,20 +1,21 @@
 # copyright (c) 2019 K Sreram, All rights reserved.
-from os import listdir
-from os.path import isfile, join
-import urllib.parse
-import cv2
 import os
-import matplotlib.pyplot as plt
-from skimage import io
-import numpy
+import urllib.parse
 
+import cv2
+import matplotlib.pyplot as plt
+import numpy
+import tensorflow as tf
+from os.path import isfile, join
+from skimage import io
+
+from model_saver_manager import model_saver
 from prepare_dataset.sr_image_ds_manager import ImageDSManage
 from trainer.exceptions import LossUninitialized, LossOptimizerUninitialized, RequiredPlaceHolderNotInitialized, \
-    TrainDatasetNotInitialized, TestDatasetNotInitialized, SaveInstanceNotInitialized, RunTestError, \
-    ModelNotInitialized, ParameterNotInitialized, InvalidArgumentCombination, InvalidType
+    TrainDatasetNotInitialized, TestDatasetNotInitialized, SaveInstanceNotInitialized, ModelNotInitialized, \
+    ParameterNotInitialized, InvalidArgumentCombination, InvalidType
 from trainer.model_base import ModelBase
-import tensorflow as tf
-from model_saver_manager import model_saver
+from utils.running_avg import RunningAvg
 
 
 class SRModel(ModelBase):
@@ -293,11 +294,14 @@ class SRModel(ModelBase):
             loss = self.__get_rms_triplet_loss()
         return loss
 
+    REBASE_BEST_CHECKPOINT = model_saver.ModelSaver.REBASE_BEST_CHECKPOINT
+    DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS = model_saver.ModelSaver.DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS
+
     def run_train(self,
                   # parameters for train:
                   num_of_epochs=10, single_epoch_count=12010, checkpoint_iteration_count=3000,
                   display_status=True, display_status_iter=100, batch_size=10, down_sample_factor=4,
-                  min_x_f=100, min_y_f=100,
+                  min_x_f=100, min_y_f=100, running_avg_usage=True,
 
                   # parameters for test:
                   terminal_loss=0.00001, test_min_x_f=500, test_min_y_f=500, number_of_samples=int(100),
@@ -305,9 +309,13 @@ class SRModel(ModelBase):
                   execute_tests=True,
 
                   # parameters for checkpoint:
-                  save_checkpoints=True):
+                  save_checkpoints=True, rebase_checkpoint=REBASE_BEST_CHECKPOINT,
+                  rebase_checkpoint_best_radius=DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS):
         """
 
+        :param rebase_checkpoint_best_radius:
+        :param rebase_checkpoint:
+        :param running_avg_usage:
         :param break_samples_by:
         :param test_min_y_f:
         :param test_min_x_f:
@@ -342,12 +350,15 @@ class SRModel(ModelBase):
 
         self.__model_saver_inst.set_first_run()
 
+        running_avg = RunningAvg()
+
         def execute_all_epoch():
             with tf.Session() as sess:
                 init = tf.initialize_all_variables()
                 sess.run(init)
                 iteration_count = 0
                 total_iterations = num_of_epochs * single_epoch_count
+                cur_train_loss = [float('inf')]
 
                 def get_train_loss():
                     result_ = self.__train_ds_manage.get_batch(batch_size=batch_size,
@@ -357,20 +368,25 @@ class SRModel(ModelBase):
 
                     min_x_, min_y_, batch_down_sampled_, batch_original_ = result_
 
-                    return sess.run(fetches=[train_loss],
-                                    feed_dict={self.__get_input_data_placeholder(): batch_down_sampled_,
-                                               self.__get_expected_output_placeholder(): batch_original_})
+                    cur_train_loss[0] = sess.run(fetches=[train_loss],
+                                                 feed_dict={self.__get_input_data_placeholder(): batch_down_sampled_,
+                                                            self.__get_expected_output_placeholder(): batch_original_})[0]
 
                 for epoch in range(num_of_epochs):
 
                     for i in range(single_epoch_count):
 
+                        if save_checkpoints or running_avg_usage:
+                            get_train_loss()
+
                         if save_checkpoints:
-                            cur_train_loss = get_train_loss()
                             self.__model_saver_inst.checkpoint_model(float(cur_train_loss[0]), sess=sess,
                                                                      skip_type=ModelSaver.TimeIterSkipManager.ST_ITER_SKIP,
                                                                      skip_duration=checkpoint_iteration_count,
-                                                                     exec_on_checkpoint=print_checkpoint)
+                                                                     exec_on_first_run=get_train_loss,
+                                                                     exec_on_checkpoint=print_checkpoint,
+                                                                     rebase_checkpoint=rebase_checkpoint,
+                                                                     rebase_best_checkpoint_radius=rebase_checkpoint_best_radius)
 
                         result = self.__train_ds_manage.get_batch(batch_size=batch_size,
                                                                   down_sample_factor=down_sample_factor,
@@ -384,11 +400,18 @@ class SRModel(ModelBase):
                         sess.run(fetches=[optimizer],
                                  feed_dict={self.__get_input_data_placeholder(): batch_down_sampled,
                                             self.__get_expected_output_placeholder(): batch_original})
+                        if running_avg_usage:
+                            running_avg.add_to_avg(cur_train_loss[0])
 
                         if display_status and iteration_count % display_status_iter == 0:
-                            cur_train_loss = get_train_loss()
-                            print("Epoch: %d, iteration count: %d, epoch train percentage : %.3f%%, "
-                                  "total train percentage : %.3f%%,  training loss: %f" %
+
+                            if not running_avg_usage:
+                                get_train_loss()
+                            else:
+                                cur_train_loss[0] = running_avg.get_avg()
+
+                            print("Epoch: %d, iteration count: %d, epoch train percentage : %f%%, "
+                                  "total train percentage : %f%%,  training loss: %f" %
                                   (epoch, iteration_count, ((float(i) / single_epoch_count) * 100),
                                    ((float(iteration_count) / total_iterations) * 100), cur_train_loss[0]))
 
@@ -404,8 +427,8 @@ class SRModel(ModelBase):
 
                     # display at the end of epoch, if not displayed
                     if display_status and iteration_count % display_status_iter != 0:
-                        cur_train_loss = get_train_loss()
-                        print("Epoch: %d, total train percentage : %.3f%%, training loss: %f" %
+                        get_train_loss()
+                        print("Epoch: %d, total train percentage : %f%%, training loss: %f" %
                               (epoch, ((float(iteration_count) / total_iterations) * 100), cur_train_loss[0]))
 
         execute_all_epoch()
@@ -473,7 +496,7 @@ class SRModel(ModelBase):
             cur_test_loss = get_test_loss(temp_number_of_samples)
 
         if display_status:
-            print("Test loss: %.3f, Total samples checked : %d" % (cur_test_loss[0], number_of_samples))
+            print("Test loss: %f, Total samples checked : %d" % (cur_test_loss[0], number_of_samples))
 
         if not session_is_parent:
             sess.close()
@@ -538,7 +561,7 @@ if __name__ == "__main__":
 
         modelsave = model_saver.ModelSaver(
             'exp1_', parameters,
-            save_file_path="/media/sreramk/storage-main/elementary_frame/model_checkpoints_new/")
+            save_file_path="/media/sreramk/storage-main/elementary_frame/checkpoints/")
 
         model_instance.set_model_saver_inst(modelsave)
 
@@ -555,7 +578,7 @@ if __name__ == "__main__":
         img = model_instance.fetch_image('/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/0848.png',
                                          with_batch_column=False)
         # model_instance.display_image(img)
-        model_instance.run_train(num_of_epochs=1, single_epoch_count=3010)
+        model_instance.run_train(num_of_epochs=2, single_epoch_count=6010, checkpoint_iteration_count=1000)
         for i in range(3):
             _, __, img = ImageDSManage.random_crop(img, 250, 250)
             img = model_instance.zoom_image(img, 4, 4)
@@ -570,9 +593,9 @@ if __name__ == "__main__":
 
             img = result
 
-        img = model_instance.fetch_image("https://cdn.insidetheperimeter.ca/wp-content/uploads/2015/11/Albert_einstein_by_zuzahin-d5pcbug-WikiCommons-768x706.jpg")
+        img = model_instance.fetch_image(
+            "https://cdn.insidetheperimeter.ca/wp-content/uploads/2015/11/Albert_einstein_by_zuzahin-d5pcbug-WikiCommons-768x706.jpg")
         size_x, size_y = model_instance.get_image_dimensions(img)
-
 
 
     main_fnc()

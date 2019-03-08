@@ -1,4 +1,7 @@
 # copyright (c) 2019 K Sreram, All rights reserved.
+
+# TODO break this class into multiple classes, to distinctly separate each functionality
+
 import contextlib
 import copy
 import datetime
@@ -13,7 +16,7 @@ from multiprocessing import Pool, Process, Pipe, Queue
 import tensorflow as tf
 
 from model_saver_manager.exceptions import InvalidCheckpointID, ArgumentMustBeAListOfTensors, InvalidArgumentType, \
-    InvalidNumberOfArgumentsPassed, InvalidLeftRightArgumentCombination, InvalidArgument
+    InvalidNumberOfArgumentsPassed, InvalidLeftRightArgumentCombination, InvalidArgument, InvalidRangeArg
 from utils.running_avg import RunningAvg
 
 
@@ -86,6 +89,8 @@ class ModelSaver:
 
     REBASE_CHECKPOINT_IGNORE = "rebase_checkpoint_ignore"  # signifies that no rebasing happens for each checkpoint
     # and the currently-active checkpoint will remain active.
+
+    DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS = (-5, 5)
 
     # As of now, only support for TensorFlow is added. In the future, this library will be generalized to support
     # multiple ML platforms.
@@ -413,6 +418,15 @@ class ModelSaver:
         with open(checkpoint_addr, "w") as output_file:
             json.dump(self.__checkpoint_record, output_file, default=ModelSaver.DATE_HANDLE_FOR_JSON)
 
+    def __get_checkpoint_store(self):
+        # TODO substitute this function with all the calls to the line 'self.__header[self.H_CHECK_POINT_STORE]'
+        return self.__header[self.H_CHECK_POINT_STORE]
+
+    def __get_from_checkpoint_store(self, checkpoint_id):
+        temp = copy.deepcopy(self.__get_checkpoint_store()[checkpoint_id])
+        temp[ModelSaver.H_CHECK_POINT_ID] = checkpoint_id
+        return temp
+
     def delete_checkpoint(self, checkpoint_id=LAST_CHECKPOINT, commit=True):
         """
 
@@ -489,25 +503,68 @@ class ModelSaver:
             return True
         return False
 
-    def __rebase_ignore_bad_checkpoint(self, checkpoint_efficiency, latest_checkpoint_id):
+    def __rebase_ignore_bad_checkpoint(self, checkpoint_efficiency, old_latest_checkpoint_id, show_rebase_status,
+                                       **args):
 
         checkpoint_store = self.__header[ModelSaver.H_CHECK_POINT_STORE]
 
-        last_efficiency = checkpoint_store[latest_checkpoint_id][ModelSaver.H_CHECK_POINT_EFFICIENCY]
+        last_efficiency = checkpoint_store[old_latest_checkpoint_id][ModelSaver.H_CHECK_POINT_EFFICIENCY]
 
-        if last_efficiency < checkpoint_efficiency: # signifies that the last checkpoint is better
+        if last_efficiency < checkpoint_efficiency:  # signifies that the last checkpoint is better
             # TODO here "efficiency" means "not efficiency" or "loss". This naming must be corrected:
             # Regardless if the name is changed, "efficiency" is treated as "loss". Correcting this
             # will avoid confusion.
-            self.load_checkpoint(latest_checkpoint_id)
 
+            # at this point, the actual latest_checkpoint_id will belong to the new checkpoint. But this method attempts
+            # to check if the current checkpoint had shown any significant improvement over the previous one. If no
+            # improvement was shown, this gets reverted.
+            self.load_checkpoint(old_latest_checkpoint_id, **args)
+            if show_rebase_status:
+                print("Rebasing to checkpoint: %d" % old_latest_checkpoint_id)
+
+    def __rebase_best_checkpoint(self, new_checkpoint_efficiency, old_latest_checkpoint_id,
+                                 rebase_best_checkpoint_radius, show_rebase_status,
+                                 **args):
+
+        checkpoint_store = self.__header[ModelSaver.H_CHECK_POINT_STORE]
+
+        low_range = old_latest_checkpoint_id + rebase_best_checkpoint_radius[0]
+        high_range = old_latest_checkpoint_id + rebase_best_checkpoint_radius[1]
+
+        query_result = self.query_checkpoint_info(
+            check_point_id_range=(low_range, high_range),
+            right_range=ModelSaver.CLOSED, left_range=ModelSaver.CLOSED)
+
+        if query_result is None or len(query_result) == 0:
+            return
+
+        # min_ele = min(query_result, key=lambda x: x[ModelSaver.H_CHECK_POINT_EFFICIENCY])
+
+        min_ele = self.__get_from_checkpoint_store(old_latest_checkpoint_id)
+        for ele in query_result:
+            if min_ele is None:
+                min_ele = ele
+            elif ele[ModelSaver.H_CHECK_POINT_EFFICIENCY] < min_ele[ModelSaver.H_CHECK_POINT_EFFICIENCY]:
+                min_ele = ele
+
+        if new_checkpoint_efficiency <= min_ele[ModelSaver.H_CHECK_POINT_EFFICIENCY]:
+
+            # avoid rebasing if the most recent record has the highest efficiency.
+            return
+
+        rebase_id = min_ele[ModelSaver.H_CHECK_POINT_ID]
+        self.load_checkpoint(rebase_id, **args)
+        if show_rebase_status:
+            print("Rebasing to checkpoint: %d" % rebase_id)
 
     def checkpoint_model(self, checkpoint_efficiency, skip_type=TimeIterSkipManager.ST_ITER_SKIP,
                          skip_duration=TimeIterSkipManager.DEFAULT_SKIP,
                          checkpoint_type=DYNAMIC_CHECKPOINT,
                          checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT), reset=False,
-                         exec_on_checkpoint=None, running_avg_efficiency=True,
+                         exec_on_checkpoint=None, exec_on_first_run=None, running_avg_efficiency=True,
                          rebase_checkpoint=REBASE_CHECKPOINT_IGNORE,
+                         rebase_best_checkpoint_radius=DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS,
+                         show_rebase_status=True,
                          **args):
         """
         TODO: checkpoint_efficiency must be renamed to "loss" or something else signifying loss:
@@ -518,31 +575,47 @@ class ModelSaver:
         """
 
         if self.__ensure_first_run() or reset:
-            checkpoint_id = self.__resolve_checkpoint_id(checkpoint_id, ModelSaver.NOT_IN_GET_METHOD)
-            self.load_checkpoint(checkpoint_id=checkpoint_id, reset=False, **args)
+            checkpoint_id = self.__resolve_checkpoint_id(checkpoint_id, ModelSaver.IN_GET_METHOD)
+
+            if checkpoint_id is None:
+                # creates a checkpoint if this is the first checkpoint
+                self.create_check_point(checkpoint_efficiency=checkpoint_efficiency, checkpoint_type=checkpoint_type,
+                                        checkpoint_id=checkpoint_id, **args)
+            else:
+                self.load_checkpoint(checkpoint_id=checkpoint_id, reset=False, **args)
+
             self.__time_iter_skip = ModelSaver.TimeIterSkipManager(skip_type=skip_type, skip_duration=skip_duration)
             self.__running_avg_in_checkpoint_model = RunningAvg()
+            if exec_on_first_run is not None:
+                exec_on_first_run()
 
         if running_avg_efficiency and checkpoint_efficiency is not None:
             self.__running_avg_in_checkpoint_model.add_to_avg(checkpoint_efficiency)
 
         if self.__time_iter_skip.check_execute_checkpoint():
-            checkpoint_efficiency = self.__running_avg_in_checkpoint_model.get_avg()
 
-            try:
-                old_latest_checkpoint_id = self.__resolve_checkpoint_id(ModelSaver.LATEST_CHECK_POINT_ID,
-                                                                  ModelSaver.IN_GET_METHOD)
-            except InvalidCheckpointID:
-                # signifies that there does not exist a "latest checkpoint id" at this point.
-                old_latest_checkpoint_id = None
+            checkpoint_efficiency = self.__running_avg_in_checkpoint_model.get_avg()
+            self.__running_avg_in_checkpoint_model.reset()
+
+            old_latest_checkpoint_id = None  # latest checkpoint, before the new checkpoint gets added.
+            if rebase_checkpoint != ModelSaver.REBASE_CHECKPOINT_IGNORE:
+                try:
+                    old_latest_checkpoint_id = self.__resolve_checkpoint_id(ModelSaver.LATEST_CHECK_POINT_ID,
+                                                                            ModelSaver.IN_GET_METHOD)
+                except InvalidCheckpointID:
+                    # signifies that there does not exist a "latest checkpoint id" at this point.
+                    pass
 
             self.create_check_point(checkpoint_efficiency=checkpoint_efficiency, checkpoint_type=checkpoint_type,
                                     checkpoint_id=checkpoint_id, **args)
 
-            if rebase_checkpoint == ModelSaver.REBASE_IGNORE_BAD_CHECKPOINT and \
-                    old_latest_checkpoint_id is not None:
-                self.__rebase_ignore_bad_checkpoint(checkpoint_efficiency, old_latest_checkpoint_id)
-
+            if old_latest_checkpoint_id is not None:
+                if rebase_checkpoint == ModelSaver.REBASE_IGNORE_BAD_CHECKPOINT:
+                    self.__rebase_ignore_bad_checkpoint(checkpoint_efficiency, old_latest_checkpoint_id,
+                                                        show_rebase_status, **args)
+                elif rebase_checkpoint == ModelSaver.REBASE_BEST_CHECKPOINT:
+                    self.__rebase_best_checkpoint(checkpoint_efficiency, old_latest_checkpoint_id, rebase_best_checkpoint_radius,
+                                                  show_rebase_status, **args)
             if exec_on_checkpoint is not None:
                 exec_on_checkpoint()
 
@@ -577,13 +650,20 @@ class ModelSaver:
 
         raise InvalidNumberOfArgumentsPassed
 
+    @staticmethod
+    def __ensure_range(**args):
+
+        for ele_key, ele_val in args.items():
+            if (ele_val is None) or ( (len(ele_val) == 2) and (ele_val[0] <= ele_val[1])):
+                continue
+            raise InvalidRangeArg
+
     def query_checkpoint_info(self, check_point_id_range=None,
                               check_point_time_range=None,
                               check_point_serial_number_range=None,
                               check_point_efficiency_range=None,
                               left_range=CLOSED,
-                              right_range=CLOSED
-                              ):
+                              right_range=CLOSED):
         """
         Out of the given parameters, only one of the parameters must be a valid range, or this method will throw an
         exception.
@@ -600,10 +680,17 @@ class ModelSaver:
                  contains all the attributes describing a record along with its record id, associated with their
                  respective flags.
         """
-        field_name = self.__ensure_exactly_one_field(check_point_id_range=check_point_id_range,
-                                                     check_point_time_range=check_point_time_range,
-                                                     check_point_serial_number_range=check_point_serial_number_range,
-                                                     check_point_efficiency_range=check_point_efficiency_range)
+        arguments = {
+            'check_point_id_range': check_point_id_range,
+            'check_point_time_range': check_point_time_range,
+            'check_point_serial_number_range': check_point_serial_number_range,
+            'check_point_efficiency_range': check_point_efficiency_range
+        }
+
+        field_name = self.__ensure_exactly_one_field(**arguments)
+
+        self.__ensure_range(**arguments)
+
         result = []
         checkpoint_store = self.__header[ModelSaver.H_CHECK_POINT_STORE]
 
@@ -641,9 +728,15 @@ class ModelSaver:
             return beg, end, wrap_compare
 
         def save_to_result(checkpoint_id):
-            temp = copy.deepcopy(checkpoint_store[checkpoint_id])
-            temp[ModelSaver.H_CHECK_POINT_ID] = checkpoint_id
-            result.append(temp)
+            #  The following are the flags corresponding to the data-values that were returned:
+            #  H_CHECK_POINT_ID
+            #  H_CHECK_POINT_NAME
+            #  H_CHECK_POINT_TIME_STAMP
+            #  H_CHECK_POINT_EFFICIENCY
+
+            # temp = copy.deepcopy(checkpoint_store[checkpoint_id])
+            # temp[ModelSaver.H_CHECK_POINT_ID] = checkpoint_id
+            result.append(self.__get_from_checkpoint_store(checkpoint_id))
 
         def range_match_store(checkpoint_range, key=None):
             store_iterator = iter(checkpoint_store)
