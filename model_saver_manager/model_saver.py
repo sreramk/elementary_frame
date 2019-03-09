@@ -5,23 +5,21 @@
 import contextlib
 import copy
 import datetime
-import errno
 import json
-import numpy
 import os
 import time
 from collections import OrderedDict
-from multiprocessing import Pool, Process, Pipe, Queue
 
-import tensorflow as tf
-
-from model_saver_manager.exceptions import InvalidCheckpointID, ArgumentMustBeAListOfTensors, InvalidArgumentType, \
-    InvalidNumberOfArgumentsPassed, InvalidLeftRightArgumentCombination, InvalidArgument, InvalidRangeArg
+from model_saver_manager.exceptions import InvalidCheckpointID, InvalidArgumentType, \
+    InvalidNumberOfArgumentsPassed, InvalidLeftRightArgumentCombination, InvalidRangeArg, UnimplementedFeature, \
+    UnknownOrUnspecifiedModel
+from model_saver_manager.save_support import SaveSupport
+from model_saver_manager.tf_save_support import TensorFlowParamsHandle
 from utils.running_avg import RunningAvg
 
 
 class ModelSaver:
-    DATE_HANDLE_FOR_JSON = lambda obj: (
+    __DATE_HANDLE_FOR_JSON = lambda obj: (
         obj.isoformat()
         if isinstance(obj, (datetime.datetime, datetime.date))
         else None
@@ -97,57 +95,6 @@ class ModelSaver:
 
     MT_TENSORFLOW = "mt_TensorFlow"
     MT_PYTORCH = "mt_PyTorch"
-
-    class TensorFlowParamsHanlde:
-
-        PREFIX_INP = "placeholder_"
-
-        def __init__(self, tfvariable_list, name):
-
-            self.__tf_variable_list_raw = None
-            self.__tfvar_inputs = None
-            self.__assign_to_tensor_oper = None
-            self.change_tensors(tfvariable_list)
-            self.__name = name
-            self.make_tensors_ready()
-
-        def make_tensors_ready(self):
-            PHandle = ModelSaver.TensorFlowParamsHanlde
-            self.__tfvar_inputs = []  # placeholder lists
-            self.__assign_to_tensor_oper = []  # a temporary storage for the parameter values before being extracted
-
-            for tfvars in self.__tf_variable_list_raw:
-                cur_inp = tf.placeholder(dtype=tfvars.dtype, shape=tfvars.get_shape(),
-                                         name=PHandle.PREFIX_INP + self.__name)
-                self.__tfvar_inputs.append(cur_inp)
-                self.__assign_to_tensor_oper.append(tf.assign(tfvars, cur_inp))
-
-        def change_tensors(self, tf_variable_list):
-            self.__tf_variable_list_raw = tf_variable_list
-
-            if not isinstance(self.__tf_variable_list_raw, list):
-                raise ArgumentMustBeAListOfTensors
-
-            if not all(isinstance(tfvariable, tf.Variable) for tfvariable in self.__tf_variable_list_raw):
-                raise ArgumentMustBeAListOfTensors
-
-        def get_pyprams(self, sess):
-            result = sess.run(fetches=self.__tf_variable_list_raw)
-            for i in range(len(result)):
-                result[i] = result[i].tolist()
-            return result
-
-        def set_tensors(self, pyprams, sess):
-            for i in range(len(pyprams)):
-                pyprams[i] = numpy.array(pyprams[i])
-
-            def create_feed_dict():
-                result = {}
-                for i in range(len(self.__tfvar_inputs)):
-                    result[self.__tfvar_inputs[i]] = pyprams[i]
-                return result
-
-            return sess.run(fetches=self.__assign_to_tensor_oper, feed_dict=create_feed_dict())
 
     class TimeIterSkipManager:
 
@@ -226,14 +173,9 @@ class ModelSaver:
         self.__header_address = None  # holds the address to the header
         self.__first_run = None  # triggers a different behavior for the first iteration of the check-pointing process
 
-        if model_type == ModelSaver.MT_TENSORFLOW:
-            self.__converter_instance = ModelSaver.TensorFlowParamsHanlde(tensor_prams, save_name)
+        self.__initialize_model(model_type, tensor_prams, save_name)
 
-        if reset:
-            self.delete_all_saved_states()
-            self.__load_header(True)
-        else:
-            self.__load_header(False)
+        self.__initialize_header(reset)
 
         self.__checkpoint_record = None  # holds the checkpoint current record. After each checkpoint, this gets
         # replaced by the new checkpoint that needs to be added if the checkpoint strategy is dynamic (which is default)
@@ -279,6 +221,21 @@ class ModelSaver:
                             ModelSaver.H_LATEST_CHECK_POINT_ID: latest_checkpoint_id,
                             ModelSaver.H_CHECK_POINT_STORE: checkpoint_store})
 
+    def __initialize_model(self, model_type, tensor_prams, save_name):
+        if model_type == ModelSaver.MT_TENSORFLOW:
+            self.__converter_instance = TensorFlowParamsHandle(tensor_prams, save_name)
+        elif model_type == ModelSaver.MT_PYTORCH:
+            raise UnimplementedFeature
+        elif isinstance(model_type, SaveSupport):
+            raise UnknownOrUnspecifiedModel
+
+    def __initialize_header(self, reset):
+        if reset:
+            self.delete_all_saved_states()
+            self.__load_header(True)
+        else:
+            self.__load_header(False)
+
     def __header_initialized(self):
         return self.__header is not None
 
@@ -312,6 +269,9 @@ class ModelSaver:
         """
         checkpoint_id_list = None
 
+        if checkpoint_id is None:
+            return None
+
         if not isinstance(checkpoint_id, int):
             checkpoint_id_list = copy.deepcopy(checkpoint_id)
             if len(checkpoint_id_list) <= iteration_count:
@@ -341,8 +301,7 @@ class ModelSaver:
                 return self.__checkpoint_record[ModelSaver.H_CHECK_POINT_ID]
         elif checkpoint_id == ModelSaver.LATEST_CHECK_POINT_ID:
             latest_checkpoint = self.__header[ModelSaver.H_LATEST_CHECK_POINT_ID]
-            if latest_checkpoint is not None and \
-                    latest_checkpoint in checkpoint_store:
+            if latest_checkpoint is not None and latest_checkpoint in checkpoint_store:
                 return latest_checkpoint
         elif checkpoint_id == ModelSaver.NONE_CHECKPOINT:
             return None
@@ -385,7 +344,7 @@ class ModelSaver:
         with open(self.__header_address, 'w') as output_file:
             #  dmp = json.dumps(self.__header, default=ModelSaver.DATE_HANDLE_FOR_JSON)
             safe_header = self.__change_h_check_point_store_keys_type(self.__header, str)
-            json.dump(safe_header, output_file, default=ModelSaver.DATE_HANDLE_FOR_JSON)
+            json.dump(safe_header, output_file, default=ModelSaver.__DATE_HANDLE_FOR_JSON)
 
     def __delete_header_record(self, checkpoint_id, commit=True):
         """
@@ -416,7 +375,7 @@ class ModelSaver:
         checkpoint_id = self.__checkpoint_record[ModelSaver.H_CHECK_POINT_ID]
         checkpoint_addr = self.__get_checkpoint_addr(checkpoint_id)
         with open(checkpoint_addr, "w") as output_file:
-            json.dump(self.__checkpoint_record, output_file, default=ModelSaver.DATE_HANDLE_FOR_JSON)
+            json.dump(self.__checkpoint_record, output_file, default=ModelSaver.__DATE_HANDLE_FOR_JSON)
 
     def __get_checkpoint_store(self):
         # TODO substitute this function with all the calls to the line 'self.__header[self.H_CHECK_POINT_STORE]'
@@ -527,8 +486,6 @@ class ModelSaver:
                                  rebase_best_checkpoint_radius, show_rebase_status,
                                  **args):
 
-        checkpoint_store = self.__header[ModelSaver.H_CHECK_POINT_STORE]
-
         low_range = old_latest_checkpoint_id + rebase_best_checkpoint_radius[0]
         high_range = old_latest_checkpoint_id + rebase_best_checkpoint_radius[1]
 
@@ -549,7 +506,6 @@ class ModelSaver:
                 min_ele = ele
 
         if new_checkpoint_efficiency <= min_ele[ModelSaver.H_CHECK_POINT_EFFICIENCY]:
-
             # avoid rebasing if the most recent record has the highest efficiency.
             return
 
@@ -558,7 +514,8 @@ class ModelSaver:
         if show_rebase_status:
             print("Rebasing to checkpoint: %d" % rebase_id)
 
-    def checkpoint_model(self, checkpoint_efficiency, skip_type=TimeIterSkipManager.ST_ITER_SKIP,
+    def checkpoint_model(self, checkpoint_efficiency=None,
+                         skip_type=TimeIterSkipManager.ST_ITER_SKIP,
                          skip_duration=TimeIterSkipManager.DEFAULT_SKIP,
                          checkpoint_type=DYNAMIC_CHECKPOINT,
                          checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT), reset=False,
@@ -581,7 +538,8 @@ class ModelSaver:
             if checkpoint_type == ModelSaver.DYNAMIC_CHECKPOINT:
                 if checkpoint_id is None:
                     # creates a checkpoint if this is the first checkpoint
-                    self.create_check_point(checkpoint_efficiency=checkpoint_efficiency, checkpoint_type=checkpoint_type,
+                    self.create_check_point(checkpoint_efficiency=checkpoint_efficiency,
+                                            checkpoint_type=checkpoint_type,
                                             checkpoint_id=checkpoint_id, **args)
                 else:
                     if not self.load_checkpoint(checkpoint_id=checkpoint_id, reset=False, **args):
@@ -626,7 +584,8 @@ class ModelSaver:
                     self.__rebase_ignore_bad_checkpoint(checkpoint_efficiency, old_latest_checkpoint_id,
                                                         show_rebase_status, **args)
                 elif rebase_checkpoint == ModelSaver.REBASE_BEST_CHECKPOINT:
-                    self.__rebase_best_checkpoint(checkpoint_efficiency, old_latest_checkpoint_id, rebase_best_checkpoint_radius,
+                    self.__rebase_best_checkpoint(checkpoint_efficiency, old_latest_checkpoint_id,
+                                                  rebase_best_checkpoint_radius,
                                                   show_rebase_status, **args)
             if exec_on_checkpoint is not None:
                 exec_on_checkpoint()
@@ -666,7 +625,7 @@ class ModelSaver:
     def __ensure_range(**args):
 
         for ele_key, ele_val in args.items():
-            if (ele_val is None) or ( (len(ele_val) == 2) and (ele_val[0] <= ele_val[1])):
+            if (ele_val is None) or ((len(ele_val) == 2) and (ele_val[0] <= ele_val[1])):
                 continue
             raise InvalidRangeArg
 

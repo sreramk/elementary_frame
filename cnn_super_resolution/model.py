@@ -294,8 +294,14 @@ class SRModel(ModelBase):
             loss = self.__get_rms_triplet_loss()
         return loss
 
+    # TODO Create command-line friendly implementation, and restructure this overflowing list of arguments.
+
     REBASE_BEST_CHECKPOINT = model_saver.ModelSaver.REBASE_BEST_CHECKPOINT
     DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS = model_saver.ModelSaver.DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS
+    DYNAMIC_CHECKPOINT = model_saver.ModelSaver.DYNAMIC_CHECKPOINT
+    STATIC_CHECKPOINT = model_saver.ModelSaver.STATIC_CHECKPOINT
+    LATEST_CHECK_POINT_ID = model_saver.ModelSaver.LATEST_CHECK_POINT_ID
+    LAST_CHECKPOINT = model_saver.ModelSaver.LAST_CHECKPOINT
 
     def run_train(self,
                   # parameters for train:
@@ -310,9 +316,12 @@ class SRModel(ModelBase):
 
                   # parameters for checkpoint:
                   save_checkpoints=True, rebase_checkpoint=REBASE_BEST_CHECKPOINT,
-                  rebase_checkpoint_best_radius=DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS):
+                  rebase_checkpoint_best_radius=DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS,
+                  checkpoint_type=DYNAMIC_CHECKPOINT, checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT)):
         """
 
+        :param checkpoint_id:
+        :param checkpoint_type:
         :param rebase_checkpoint_best_radius:
         :param rebase_checkpoint:
         :param running_avg_usage:
@@ -382,6 +391,8 @@ class SRModel(ModelBase):
                         if save_checkpoints:
                             self.__model_saver_inst.checkpoint_model(float(cur_train_loss[0]), sess=sess,
                                                                      skip_type=ModelSaver.TimeIterSkipManager.ST_ITER_SKIP,
+                                                                     checkpoint_type=checkpoint_type,
+                                                                     checkpoint_id=checkpoint_id,
                                                                      skip_duration=checkpoint_iteration_count,
                                                                      exec_on_first_run=get_train_loss,
                                                                      exec_on_checkpoint=print_checkpoint,
@@ -578,7 +589,8 @@ if __name__ == "__main__":
         img = model_instance.fetch_image('/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/0848.png',
                                          with_batch_column=False)
         # model_instance.display_image(img)
-        model_instance.run_train(num_of_epochs=2, single_epoch_count=6010, checkpoint_iteration_count=1000)
+        model_instance.run_train(num_of_epochs=2, single_epoch_count=6010, checkpoint_iteration_count=1000,
+                                 checkpoint_type=model_instance.DYNAMIC_CHECKPOINT)
         for i in range(3):
             _, __, img = ImageDSManage.random_crop(img, 250, 250)
             img = model_instance.zoom_image(img, 4, 4)

@@ -73,3 +73,32 @@ class NoneValueException(ModelSaverException):
     Raised to indicate that a particular value is None.
     """
     pass
+
+
+class UnimplementedFeature(ModelSaverException):
+    """
+    Raised when a feature is potentially implementable but still remains un-implemented.
+    """
+    pass
+
+
+class MethodMustBeOverridden(ModelSaverException):
+    """
+    raised when the method isn't overloaded.
+    """
+    pass
+
+
+class TFSessionVariableCannotBeNone(ModelSaverException):
+    """
+    raised when the session argument is None, or not given in the previous calls.
+    """
+    pass
+
+
+class UnknownOrUnspecifiedModel(ModelSaverException):
+    """
+    Raised when the library to use isn't specified. Not all libraries are supported, but it is possible to add support
+    for the unsupported libraries.
+    """
+    pass
