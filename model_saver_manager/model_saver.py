@@ -8,11 +8,12 @@ import datetime
 import json
 import os
 import time
+from argparse import Namespace
 from collections import OrderedDict
 
 from model_saver_manager.exceptions import InvalidCheckpointID, InvalidArgumentType, \
     InvalidNumberOfArgumentsPassed, InvalidLeftRightArgumentCombination, InvalidRangeArg, UnimplementedFeature, \
-    UnknownOrUnspecifiedModel
+    UnknownOrUnspecifiedModel, AccessToUninitializedObject
 from model_saver_manager.save_support import SaveSupport
 from model_saver_manager.tf_save_support import TensorFlowParamsHandle
 from utils.running_avg import RunningAvg
@@ -112,6 +113,8 @@ class ModelSaver:
             self.__iter_skip_duration = None
             self.__iter_skip_counter = None
 
+            self.__force_execution_seconds_skip = False
+
             self.set_skipper(skip_type, skip_duration)
 
         def __reset_time(self):
@@ -126,13 +129,28 @@ class ModelSaver:
         def __cur_iter_count(self):
             return self.__iter_skip_counter
 
+        def __is_time_force_execution(self):
+            return self.__force_execution_seconds_skip
+
+        def __force_by_time_execution(self):
+            self.__force_execution_seconds_skip = True
+
+        def force_execution(self):
+            SkipHandle = ModelSaver.TimeIterSkipManager
+            if self.__skip_type is SkipHandle.ST_SECONDS_SKIP:
+                self.__force_by_time_execution()
+            elif self.__skip_type is SkipHandle.ST_ITER_SKIP:
+                self.__iter_skip_counter = self.__iter_skip_duration + 1
+            else:
+                raise InvalidArgumentType
+
         def set_skipper(self, skip_type=ST_ITER_SKIP, skip_duration=DEFAULT_SKIP):
             SkipHandle = ModelSaver.TimeIterSkipManager
             self.__skip_type = skip_type
-            if skip_type == SkipHandle.ST_SECONDS_SKIP:
+            if skip_type is SkipHandle.ST_SECONDS_SKIP:
                 self.__reset_time()
                 self.__time_skip_duration = skip_duration
-            elif skip_type == SkipHandle.ST_ITER_SKIP:
+            elif skip_type is SkipHandle.ST_ITER_SKIP:
                 self.__reset_iter()
                 self.__iter_skip_duration = skip_duration
             else:
@@ -142,10 +160,10 @@ class ModelSaver:
 
             SkipHandle = ModelSaver.TimeIterSkipManager
 
-            if self.__skip_type == SkipHandle.ST_SECONDS_SKIP:
+            if self.__skip_type is SkipHandle.ST_SECONDS_SKIP:
                 cur_time_stamp = time.mktime(time.localtime())
                 time_diff = cur_time_stamp - self.__initial_time_stamp
-                if time_diff >= self.__time_skip_duration:
+                if time_diff >= self.__time_skip_duration or self.__is_time_force_execution():
                     self.__reset_time()
                     return True
                 return False
@@ -186,6 +204,8 @@ class ModelSaver:
 
         self.__running_avg_in_checkpoint_model = None
 
+        self.__model_checkpoint_arguments = ModelSaver.checkpoint_model_default_args(with_namespace=False)
+
     @staticmethod
     def __first(s):
         return next(iter(s))
@@ -220,6 +240,29 @@ class ModelSaver:
                             ModelSaver.H_FREE_CHECK_POINT_ID: free_checkpoint_id,
                             ModelSaver.H_LATEST_CHECK_POINT_ID: latest_checkpoint_id,
                             ModelSaver.H_CHECK_POINT_STORE: checkpoint_store})
+
+    __DEFAULT_CHECKPOINT_MODEL_ARGS = {
+        'checkpoint_efficiency': None,
+        'skip_type': TimeIterSkipManager.ST_ITER_SKIP,
+        'skip_duration': TimeIterSkipManager.DEFAULT_SKIP,
+        'checkpoint_type': DYNAMIC_CHECKPOINT,
+        'checkpoint_id': (LATEST_CHECK_POINT_ID, LAST_CHECKPOINT),
+        'reset': False,
+        'exec_on_checkpoint': None,
+        'exec_on_first_run': None,
+        'running_avg_efficiency': True,
+        'rebase_checkpoint': REBASE_BEST_CHECKPOINT,
+        'rebase_best_checkpoint_radius': DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS,
+        'show_rebase_status': True
+    }
+
+    @staticmethod
+    def checkpoint_model_default_args(with_namespace=True, **args):
+        result = dict(ModelSaver.__DEFAULT_CHECKPOINT_MODEL_ARGS)
+        result.update(args)
+        if with_namespace:
+            result = Namespace(**result)
+        return result
 
     def __initialize_model(self, model_type, tensor_prams, save_name):
         if model_type == ModelSaver.MT_TENSORFLOW:
@@ -463,6 +506,11 @@ class ModelSaver:
             return True
         return False
 
+    def force_checkpoint_model_execution(self):
+        if self.__time_iter_skip is None:
+            raise AccessToUninitializedObject
+        self.__time_iter_skip.force_execution()
+
     def __rebase_ignore_bad_checkpoint(self, checkpoint_efficiency, old_latest_checkpoint_id, show_rebase_status,
                                        **args):
 
@@ -514,16 +562,46 @@ class ModelSaver:
         if show_rebase_status:
             print("Rebasing to checkpoint: %d" % rebase_id)
 
-    def checkpoint_model(self, checkpoint_efficiency=None,
-                         skip_type=TimeIterSkipManager.ST_ITER_SKIP,
-                         skip_duration=TimeIterSkipManager.DEFAULT_SKIP,
-                         checkpoint_type=DYNAMIC_CHECKPOINT,
-                         checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT), reset=False,
-                         exec_on_checkpoint=None, exec_on_first_run=None, running_avg_efficiency=True,
-                         rebase_checkpoint=REBASE_CHECKPOINT_IGNORE,
-                         rebase_best_checkpoint_radius=DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS,
-                         show_rebase_status=True,
-                         **args):
+    def checkpoint_model_arguments(self, **args):
+        self.__model_checkpoint_arguments.update(args)
+
+    def get_checkpoint_model_arguments(self):
+        return self.__model_checkpoint_arguments
+
+    def checkpoint_model(self, **args):
+        """
+        Default arguments:
+
+        checkpoint_efficiency=None,
+        skip_type=TimeIterSkipManager.ST_ITER_SKIP,
+        skip_duration=TimeIterSkipManager.DEFAULT_SKIP,
+        checkpoint_type=DYNAMIC_CHECKPOINT,
+        checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT),
+        reset=False,
+        exec_on_checkpoint=None,
+        exec_on_first_run=None,
+        running_avg_efficiency=True,
+        rebase_checkpoint=REBASE_BEST_CHECKPOINT,
+        rebase_best_checkpoint_radius=DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS,
+        show_rebase_status=True,
+
+        :param args:
+        :return:
+        """
+        self.checkpoint_model_arguments(**args)
+        arguments = self.get_checkpoint_model_arguments()
+        return self.__checkpoint_model(**arguments)
+
+    def __checkpoint_model(self, checkpoint_efficiency=None,
+                           skip_type=TimeIterSkipManager.ST_ITER_SKIP,
+                           skip_duration=TimeIterSkipManager.DEFAULT_SKIP,
+                           checkpoint_type=DYNAMIC_CHECKPOINT,
+                           checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT), reset=False,
+                           exec_on_checkpoint=None, exec_on_first_run=None, running_avg_efficiency=True,
+                           rebase_checkpoint=REBASE_BEST_CHECKPOINT,
+                           rebase_best_checkpoint_radius=DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS,
+                           show_rebase_status=True,
+                           **args):
         """
         TODO: checkpoint_efficiency must be renamed to "loss" or something else signifying loss:
                 `checkpoint_efficiency' will be treated that way, henceforth.

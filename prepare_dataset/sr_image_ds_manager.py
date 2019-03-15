@@ -1,17 +1,13 @@
 # Copyright (c) 2019 K Sreram, All rights reserved
-import scipy
-from scipy import ndimage
-import numpy
 import os
 import random
-
-import cv2
-
 from typing import List
+
 import collections
+import cv2
+import numpy
 
 from utils import RandomDict
-from utils import check_size
 
 
 class ImageDSManage:

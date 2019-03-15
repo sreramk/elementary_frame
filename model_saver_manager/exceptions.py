@@ -102,3 +102,17 @@ class UnknownOrUnspecifiedModel(ModelSaverException):
     for the unsupported libraries.
     """
     pass
+
+
+class AccessToUninitializedObject(ModelSaverException):
+    """
+    raised when attempted to use an uninitialized object
+    """
+    pass
+
+
+class CheckpointCannotBeFirstRun(ModelSaverException):
+    """
+    The first run of this checkpoint must not be run here
+    """
+    pass

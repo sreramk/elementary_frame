@@ -5,17 +5,17 @@ import random
 from enum import Enum
 
 from prepare_dataset.batch_dataset_iterator import BatchDataSetIterator
-from prepare_dataset.exceptions import MethodNotOverridden, InvalidDataPointDefinition, StopPopulatingTrainOrTestBuffer
 from prepare_dataset.data_set_buffer import DataBuffer
+from prepare_dataset.exceptions import MethodNotOverridden, StopPopulatingTrainOrTestBuffer
 from utils.general_utils import ensure_numpy_array
 
 
 class DataSetManager:
     DEFAULT_IMG_EXTENSIONS = [".jpeg", ".jpg", ".png", ".bmp"]
 
-    class DS_TYPE(Enum):
-        TRAINING="training"
-        TESTING="testing"
+    class DsType(Enum):
+        TRAINING = "training"
+        TESTING = "testing"
 
     @staticmethod
     def get_all_files_in_dir_list(dir_list, accepted_ext):
@@ -85,6 +85,13 @@ class DataSetManager:
 
         self.__initialize_dataset()
 
+    def _reset_get(self):
+        """
+        This must reset the get procedure, which helps populate the buffer.
+        :return:
+        """
+        raise MethodNotOverridden
+
     def _preprocessor(self, data, ds_label):
         """
         This returns an instance of a fully prepared data-point which includes the input and the output in a list
@@ -101,19 +108,15 @@ class DataSetManager:
         """
         raise MethodNotOverridden
 
-    @staticmethod
-    def __check_if_datapoint(data_point):
-        if not isinstance(data_point, list) or len(data_point) != 2:
-            raise InvalidDataPointDefinition
-
     def __initialize_dataset(self):
         self.__train_buffer = DataBuffer()
         self.__test_buffer = DataBuffer()
+        self._reset_get()
 
         try:
             for count in range(self.__num_of_training_ds_to_load):
-                cur_data = self._get_data(DataSetManager.DS_TYPE.TRAINING)
-                DataSetManager.__check_if_datapoint(cur_data)
+                cur_data = self._get_data(DataSetManager.DsType.TRAINING)
+                # DataSetManager.__exception_on_non_dp(cur_data)
                 self.__train_buffer.add_to_buffer(count, cur_data)
         except StopPopulatingTrainOrTestBuffer:
             # nothing have to be done here, this helps break the loop when there is no more available data. This method
@@ -122,8 +125,8 @@ class DataSetManager:
 
         try:
             for count in range(self.__num_of_testing_ds_to_load):
-                cur_data = self._get_data(DataSetManager.DS_TYPE.TESTING)
-                DataSetManager.__check_if_datapoint(cur_data)
+                cur_data = self._get_data(DataSetManager.DsType.TESTING)
+                # DataSetManager.__exception_on_non_dp(cur_data)
                 self.__test_buffer.add_to_buffer(count, cur_data)
         except StopPopulatingTrainOrTestBuffer:
             # nothing have to be done here, this helps break the loop when there is no more available data. This method

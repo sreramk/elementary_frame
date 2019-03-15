@@ -9,7 +9,12 @@ import tensorflow as tf
 from os.path import isfile, join
 from skimage import io
 
+from cnn_super_resolution.sr_dataset_manage import SRDSManage
 from model_saver_manager import model_saver
+from model_saver_manager.exceptions import CheckpointCannotBeFirstRun
+from prepare_dataset.batch_dataset_iterator import BatchDataSetIterator
+from prepare_dataset.data_set_buffer import DataBuffer
+from prepare_dataset.dataset_manager import DataSetManager
 from prepare_dataset.sr_image_ds_manager import ImageDSManage
 from trainer.exceptions import LossUninitialized, LossOptimizerUninitialized, RequiredPlaceHolderNotInitialized, \
     TrainDatasetNotInitialized, TestDatasetNotInitialized, SaveInstanceNotInitialized, ModelNotInitialized, \
@@ -26,8 +31,10 @@ class SRModel(ModelBase):
         self.__input_data = None
         self.__expected_output_data = None
 
-        self.__train_ds_manage = None
-        self.__test_ds_manage = None
+        self.__test_ds_container = None
+        self.__train_ds_container = None
+
+        self.__ds_manage = None
 
         self.__adam_rms = None
 
@@ -265,19 +272,25 @@ class SRModel(ModelBase):
             raise InvalidType
         self.__model_saver_inst = model_saver_inst
 
-    def prepare_train_test_dataset(self, train_dataset_path, test_dataset_path, down_sample_factor,
-                                   image_buffer_limit_train=int(100 * 0.8), image_buffer_limit_test=int(100 * 0.2),
-                                   buffer_priority=1000):
-        self.__train_ds_manage = ImageDSManage(train_dataset_path,
-                                               image_buffer_limit=image_buffer_limit_train,
-                                               buffer_priority=buffer_priority)
+    ORIGINAL_DIMENSION = SRDSManage.ORIGINAL_DIMENSION
 
-        self.__test_ds_manage = ImageDSManage(test_dataset_path,
-                                              image_buffer_limit=image_buffer_limit_test,
-                                              buffer_priority=buffer_priority)
+    def prepare_train_test_dataset(self, train_ds_dir_list, test_ds_dir_list,
+                                   num_of_training_ds_to_load, num_of_testing_ds_to_load,
+                                   train_batch_size, test_batch_size=1,
+                                   down_sample_train=4,
+                                   down_sample_test=4,
+                                   training_dimension=(100, 100), testing_dimension=ORIGINAL_DIMENSION,
+                                   accepted_ext=DataSetManager.DEFAULT_IMG_EXTENSIONS):
 
-        self.__train_ds_manage.fill_buffer(down_sample_factor)
-        self.__test_ds_manage.fill_buffer(down_sample_factor)
+        self.__ds_manage = SRDSManage(train_ds_dir_list, test_ds_dir_list,
+                                      num_of_training_ds_to_load, num_of_testing_ds_to_load,
+                                      down_sample_train=4,
+                                      down_sample_test=4,
+                                      training_dimension=training_dimension, testing_dimension=testing_dimension,
+                                      accepted_ext=accepted_ext)
+
+        self.__test_ds_container = self.__ds_manage.manufacture_test_batch_iterator(test_batch_size)
+        self.__train_ds_container = self.__ds_manage.manufacture_train_batch_iterator(train_batch_size)
 
     def __get_active_optimizer(self):
         if self.is_rms_loss_active():
@@ -294,58 +307,51 @@ class SRModel(ModelBase):
             loss = self.__get_rms_triplet_loss()
         return loss
 
-    # TODO Create command-line friendly implementation, and restructure this overflowing list of arguments.
+    def __run_get_loss(self, sess, input_batch, output_batch, loss):
 
-    REBASE_BEST_CHECKPOINT = model_saver.ModelSaver.REBASE_BEST_CHECKPOINT
-    DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS = model_saver.ModelSaver.DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS
-    DYNAMIC_CHECKPOINT = model_saver.ModelSaver.DYNAMIC_CHECKPOINT
-    STATIC_CHECKPOINT = model_saver.ModelSaver.STATIC_CHECKPOINT
-    LATEST_CHECK_POINT_ID = model_saver.ModelSaver.LATEST_CHECK_POINT_ID
-    LAST_CHECKPOINT = model_saver.ModelSaver.LAST_CHECKPOINT
+        cur_train_loss = sess.run(fetches=[loss],
+                                     feed_dict={self.__get_input_data_placeholder(): input_batch,
+                                                self.__get_expected_output_placeholder(): output_batch})
+        return cur_train_loss
 
-    def run_train(self,
+    def __run_optimizer(self, sess, input_batch, output_batch, optimizer):
+        sess.run(fetches=[optimizer],
+                 feed_dict={self.__get_input_data_placeholder(): input_batch,
+                            self.__get_expected_output_placeholder(): output_batch})
+
+    # @staticmethod
+    # def run_train_default_args():
+
+    # DEFAULT_CHECKPOINT_PRAMS = ModelSaver.checkpoint_model_default_args()
+
+    def run_train(self, test_batch_size=1, train_batch_size=10, reinitialize_test_batch=False,
+                  reinitialize_train_batch=False,
                   # parameters for train:
-                  num_of_epochs=10, single_epoch_count=12010, checkpoint_iteration_count=3000,
-                  display_status=True, display_status_iter=100, batch_size=10, down_sample_factor=4,
-                  min_x_f=100, min_y_f=100, running_avg_usage=True,
-
-                  # parameters for test:
-                  terminal_loss=0.00001, test_min_x_f=500, test_min_y_f=500, number_of_samples=int(100),
-                  run_test_periodically=3000, break_samples_by=int(10),
+                  num_of_epochs=10,
+                  display_status=True, display_status_iter=70, down_sample_factor=4,
+                  running_avg_usage=True,
                   execute_tests=True,
 
                   # parameters for checkpoint:
-                  save_checkpoints=True, rebase_checkpoint=REBASE_BEST_CHECKPOINT,
-                  rebase_checkpoint_best_radius=DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS,
-                  checkpoint_type=DYNAMIC_CHECKPOINT, checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT)):
+                  save_checkpoints=True):
         """
-
-        :param checkpoint_id:
-        :param checkpoint_type:
-        :param rebase_checkpoint_best_radius:
-        :param rebase_checkpoint:
+        :param reinitialize_train_batch:
+        :param reinitialize_test_batch:
+        :param train_batch_size:
+        :param test_batch_size:
         :param running_avg_usage:
-        :param break_samples_by:
-        :param test_min_y_f:
-        :param test_min_x_f:
-        :param number_of_samples:
         :param execute_tests:
-        :param run_test_periodically: Number of iterations to wait before running the test
         :param save_checkpoints:
         :param num_of_epochs:
-        :param single_epoch_count:
-        :param checkpoint_iteration_count:
         :param display_status:
         :param display_status_iter:
-        :param batch_size:
         :param down_sample_factor:
-        :param min_x_f:
-        :param min_y_f:
-        :param terminal_loss:
+
         :return:
         """
         ModelSaver = model_saver.ModelSaver
-        if not isinstance(self.__train_ds_manage, ImageDSManage):
+        if not isinstance(self.__ds_manage, SRDSManage) or \
+                (not isinstance(self.__train_ds_container, BatchDataSetIterator) and reinitialize_train_batch):
             raise TrainDatasetNotInitialized
 
         if save_checkpoints and not isinstance(self.__model_saver_inst, model_saver.ModelSaver):
@@ -360,111 +366,95 @@ class SRModel(ModelBase):
         self.__model_saver_inst.set_first_run()
 
         running_avg = RunningAvg()
+        if reinitialize_train_batch:
+            self.__train_ds_container = self.__ds_manage.manufacture_train_batch_iterator(train_batch_size)
 
-        def execute_all_epoch():
-            with tf.Session() as sess:
-                init = tf.initialize_all_variables()
-                sess.run(init)
-                iteration_count = 0
-                total_iterations = num_of_epochs * single_epoch_count
-                cur_train_loss = [float('inf')]
+        with tf.Session() as sess:
+            init = tf.initialize_all_variables()
+            sess.run(init)
+            iteration_count = 1
+            total_iterations = num_of_epochs * len(self.__train_ds_container)
+            cur_train_loss = [float('inf')]
 
-                def get_train_loss():
-                    result_ = self.__train_ds_manage.get_batch(batch_size=batch_size,
-                                                               down_sample_factor=down_sample_factor,
-                                                               min_x_f=min_x_f,
-                                                               min_y_f=min_y_f)
+            for epoch in range(num_of_epochs):
 
-                    min_x_, min_y_, batch_down_sampled_, batch_original_ = result_
+                single_epoch_iter = 0
+                self.__train_ds_container.reset_batch_iterator()
+                for io_train_datapoint in self.__train_ds_container:
 
-                    cur_train_loss[0] = sess.run(fetches=[train_loss],
-                                                 feed_dict={self.__get_input_data_placeholder(): batch_down_sampled_,
-                                                            self.__get_expected_output_placeholder(): batch_original_})[0]
+                    input_batch = DataBuffer.get_input_dict_dp(io_train_datapoint)
+                    output_batch = DataBuffer.get_output_dict_dp(io_train_datapoint)
 
-                for epoch in range(num_of_epochs):
+                    if running_avg_usage:
+                        cur_train_loss = self.__run_get_loss(sess, input_batch, output_batch, train_loss)
+                        running_avg.add_to_avg(cur_train_loss[0])
 
-                    for i in range(single_epoch_count):
+                    def get_train_loss():
+                        return self.__run_get_loss(sess, input_batch, output_batch, train_loss)
 
-                        if save_checkpoints or running_avg_usage:
+                    if save_checkpoints:
+                        self.__model_saver_inst.checkpoint_model_arguments\
+                            (rebase_checkpoint=ModelSaver.REBASE_CHECKPOINT_IGNORE)
+
+                        self.__model_saver_inst.checkpoint_model(checkpoint_efficiency=None,
+                                                                 exec_on_first_run=get_train_loss,
+                                                                 sess=sess)
+
+                    self.__run_optimizer(sess, input_batch, output_batch, optimizer)
+
+                    if display_status and display_status_iter % iteration_count == 0:
+                        if not running_avg_usage:
                             get_train_loss()
+                        else:
+                            cur_train_loss[0] = running_avg.get_avg()
 
-                        if save_checkpoints:
-                            self.__model_saver_inst.checkpoint_model(float(cur_train_loss[0]), sess=sess,
-                                                                     skip_type=ModelSaver.TimeIterSkipManager.ST_ITER_SKIP,
-                                                                     checkpoint_type=checkpoint_type,
-                                                                     checkpoint_id=checkpoint_id,
-                                                                     skip_duration=checkpoint_iteration_count,
-                                                                     exec_on_first_run=get_train_loss,
-                                                                     exec_on_checkpoint=print_checkpoint,
-                                                                     rebase_checkpoint=rebase_checkpoint,
-                                                                     rebase_best_checkpoint_radius=rebase_checkpoint_best_radius)
+                        print("Epoch: %d, iteration count: %d, epoch train percentage : %f%%, "
+                              "total train percentage : %f%%,  training loss: %f" %
+                              (epoch, iteration_count, ((float(single_epoch_iter) /
+                                                         len(self.__train_ds_container)) * 100),
+                               ((float(iteration_count) / total_iterations) * 100), cur_train_loss[0]))
 
-                        result = self.__train_ds_manage.get_batch(batch_size=batch_size,
-                                                                  down_sample_factor=down_sample_factor,
-                                                                  min_x_f=min_x_f,
-                                                                  min_y_f=min_y_f)
+                    iteration_count += 1
+                    single_epoch_iter += 1
 
-                        min_x, min_y, batch_down_sampled, batch_original = result
+                cur_test_loss = self.run_test(sess, down_sample_factor, display_status, test_batch_size,
+                                              reinitialize_batches=reinitialize_test_batch)
+                if save_checkpoints:
 
-                        self.__train_ds_manage.acceleration_step()
+                    def checkpoint_not_first_run():
+                        raise CheckpointCannotBeFirstRun
 
-                        sess.run(fetches=[optimizer],
-                                 feed_dict={self.__get_input_data_placeholder(): batch_down_sampled,
-                                            self.__get_expected_output_placeholder(): batch_original})
-                        if running_avg_usage:
-                            running_avg.add_to_avg(cur_train_loss[0])
+                    self.__model_saver_inst.force_checkpoint_model_execution()
+                    self.__model_saver_inst.checkpoint_model_arguments \
+                        (rebase_checkpoint=ModelSaver.REBASE_BEST_CHECKPOINT)
+                    self.__model_saver_inst.checkpoint_model(checkpoint_efficiency=cur_test_loss[0],
+                                                             exec_on_first_run=checkpoint_not_first_run,
+                                                             sess=sess)
+                if display_status:
+                    print("Epoch: %d, total train percentage : %f%%, test loss: %f" %
+                      (epoch, ((float(iteration_count) / total_iterations) * 100), cur_test_loss[0]))
 
-                        if display_status and iteration_count % display_status_iter == 0:
-
-                            if not running_avg_usage:
-                                get_train_loss()
-                            else:
-                                cur_train_loss[0] = running_avg.get_avg()
-
-                            print("Epoch: %d, iteration count: %d, epoch train percentage : %f%%, "
-                                  "total train percentage : %f%%,  training loss: %f" %
-                                  (epoch, iteration_count, ((float(i) / single_epoch_count) * 100),
-                                   ((float(iteration_count) / total_iterations) * 100), cur_train_loss[0]))
-
-                        if execute_tests and iteration_count % run_test_periodically == 0:
-                            cur_test_loss = \
-                                self.run_test(test_min_x_f, test_min_y_f, number_of_samples, sess, down_sample_factor,
-                                              display_status, break_samples_by)
-
-                            if cur_test_loss[0] < terminal_loss:
-                                return
-
-                        iteration_count += 1
-
-                    # display at the end of epoch, if not displayed
-                    if display_status and iteration_count % display_status_iter != 0:
-                        get_train_loss()
-                        print("Epoch: %d, total train percentage : %f%%, training loss: %f" %
-                              (epoch, ((float(iteration_count) / total_iterations) * 100), cur_train_loss[0]))
-
-        execute_all_epoch()
         if execute_tests:
             print("Final loss:")
-            self.run_test(test_min_x_f, test_min_y_f, number_of_samples,
-                          down_sample_factor=down_sample_factor,
+            self.run_test(down_sample_factor=down_sample_factor,
                           display_status=display_status,
-                          break_samples_by=break_samples_by)
+                          batch_size=test_batch_size,
+                          reinitialize_batches=reinitialize_test_batch)
 
-    def run_test(self, min_x_f=500, min_y_f=500, number_of_samples=int(50 * 0.2), sess=None, down_sample_factor=4,
-                 display_status=True, break_samples_by=int(50 * 0.2)):
+    def run_test(self, sess=None, down_sample_factor=4,
+                 display_status=True, batch_size=int(1), reinitialize_batches=False):
         """
 
-        :param fill_ds_buffer:
-        :param break_samples_by:
+        :param reinitialize_batches:
+        :param batch_size:
         :param display_status:
         :param down_sample_factor:
         :param sess:
-        :param min_x_f:
-        :param min_y_f:
-        :param number_of_samples:
         :return:
         """
-        if not isinstance(self.__test_ds_manage, ImageDSManage):
+
+        if not isinstance(self.__ds_manage, SRDSManage) or \
+                (not isinstance(self.__test_ds_container, BatchDataSetIterator) and reinitialize_batches):
             raise TestDatasetNotInitialized
 
         if not isinstance(self.__model_saver_inst, model_saver.ModelSaver):
@@ -482,32 +472,24 @@ class SRModel(ModelBase):
 
         # loads the most recently used checkpoint.
         self.__model_saver_inst.load_checkpoint(sess=sess)
-
-        def get_test_loss(batch_size):
-            result = self.__test_ds_manage.get_batch(batch_size=batch_size,
-                                                     down_sample_factor=down_sample_factor,
-                                                     min_x_f=min_x_f,
-                                                     min_y_f=min_y_f)
-
-            min_x, min_y, batch_down_sampled, batch_original = result
-            return sess.run(fetches=[test_loss],
-                            feed_dict={self.__get_input_data_placeholder(): batch_down_sampled,
-                                       self.__get_expected_output_placeholder(): batch_original})
+        if reinitialize_batches:
+            self.__test_ds_container = self.__ds_manage.manufacture_test_batch_iterator(batch_size)
+        else:
+            self.__test_ds_container.reset_batch_iterator()
 
         cur_test_loss = [0.0]
         count = 0
-        temp_number_of_samples = number_of_samples
-        if temp_number_of_samples > break_samples_by:
-            while temp_number_of_samples >= break_samples_by:
-                cur_test_loss[0] += get_test_loss(break_samples_by)[0]
-                count += 1
-                temp_number_of_samples -= break_samples_by
-            cur_test_loss[0] = cur_test_loss[0] / count
-        else:
-            cur_test_loss = get_test_loss(temp_number_of_samples)
+
+        for test_ds_iter in self.__test_ds_container:
+            input_batch = DataBuffer.get_input_dict_dp(test_ds_iter)
+            output_batch = DataBuffer.get_output_dict_dp(test_ds_iter)
+            cur_test_loss[0] += self.__run_get_loss(sess, input_batch, output_batch, test_loss)[0]
+            count += 1
+
+        cur_test_loss[0] = cur_test_loss[0] / count
 
         if display_status:
-            print("Test loss: %f, Total samples checked : %d" % (cur_test_loss[0], number_of_samples))
+            print("Test loss: %f, Total batches checked : %d" % (cur_test_loss[0], count))
 
         if not session_is_parent:
             sess.close()
@@ -579,18 +561,18 @@ if __name__ == "__main__":
         model_instance.prepare_train_test_dataset(
             ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_train_HR/'],
             ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/'],
-            down_sample_factor=4
+            num_of_training_ds_to_load=160, num_of_testing_ds_to_load=40,
+            train_batch_size=10, testing_dimension=(500, 500)
         )
 
         model_instance.set_rms_loss()
-        model_instance.run_test(number_of_samples=32)
+        model_instance.run_test()
         print("active loss: " + model_instance.get_active_loss())
 
         img = model_instance.fetch_image('/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/0848.png',
                                          with_batch_column=False)
         # model_instance.display_image(img)
-        model_instance.run_train(num_of_epochs=2, single_epoch_count=6010, checkpoint_iteration_count=1000,
-                                 checkpoint_type=model_instance.DYNAMIC_CHECKPOINT)
+        model_instance.run_train(num_of_epochs=100)
         for i in range(3):
             _, __, img = ImageDSManage.random_crop(img, 250, 250)
             img = model_instance.zoom_image(img, 4, 4)

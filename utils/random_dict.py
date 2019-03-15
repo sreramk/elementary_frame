@@ -1,20 +1,30 @@
 # Copyright (c) 2019 K Sreram, All rights reserved
 
+import collections
 import random
 
 from utils.exceptions import KeyDoesNotExist
 
 
-class RandomDict:
-    def __init__(self, dict_value=None):
+class RandomDict(collections.MutableMapping):
 
-        self.__key_to_sno = {}
-        self.__sno_to_key = {}
-        self.__key_to_val = {}
+    KEY_TO_SNO = "key_to_sno"
+    SNO_TO_KEY = "sno_to_key"
+    KEY_TO_VAL = "key_to_val"
 
-        if dict_value is not None:
-            for k in dict_value:
-                self.add_element(k, dict_value[k])
+    def __init__(self, seq=None, inst_key_to_sno=None,
+                 inst_sno_to_key=None, inst_key_to_val=None, **kwargs):
+
+        if inst_key_to_sno is None or inst_sno_to_key is None or inst_key_to_val is None:
+            inst_key_to_sno = {}
+            inst_sno_to_key = {}
+            inst_key_to_val = {}
+
+        self.__key_to_sno = inst_key_to_sno
+        self.__sno_to_key = inst_sno_to_key
+        self.__key_to_val = inst_key_to_val
+
+        self.update(seq, **kwargs)
 
     def get_element(self, key):
         return self.__key_to_val[key]
@@ -80,6 +90,15 @@ class RandomDict:
         """
         return RandomDict(self.__key_to_val)
 
+    def update(self, seq, **kwargs):
+        if kwargs is not None:
+            for k in kwargs:
+                self.add_element(k, kwargs[k])
+
+        if isinstance(seq, collections.MutableMapping):
+            for k in seq:
+                self.add_element(k, seq[k])
+
     def __str__(self):
         return "Key to serial number: " + str(self.__key_to_sno) + \
                "\n" + "Serial number to key: " + str(self.__sno_to_key) + "\n Key to value: " + \
@@ -90,6 +109,21 @@ class RandomDict:
 
     def __contains__(self, item):
         return item in self.__key_to_val
+
+    def __delitem__(self, key):
+        self.delete_element(key)
+
+    def __getitem__(self, key):
+        return self.get_element(key)
+
+    def __iter__(self):
+        return iter(self.__key_to_val)
+
+    def __setitem__(self, key, value):
+        self.add_element(key, value)
+
+    def items(self):
+        return self.__key_to_val.items()
 
 
 if __name__ == "__main__":
@@ -147,9 +181,11 @@ if __name__ == "__main__":
     x['c'].set_a(10)
     print("#####################")
 
+
     def display(d):
-        for k,v in d.items():
+        for k, v in d.items():
             print(k, d[k])
+
 
     for k, v in y.items():
         print(y[k])
@@ -158,11 +194,10 @@ if __name__ == "__main__":
     y = {"a": A(1), "b": A(2), "c": A(3)}
 
     y["a"] = x["a"]
-    y["b"]= x["b"]
+    y["b"] = x["b"]
     del x["b"]
     x["a"].set_a(100)
     print("##################")
     display(x)
     print("#################")
     display(y)
-

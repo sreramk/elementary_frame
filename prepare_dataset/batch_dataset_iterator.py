@@ -6,7 +6,8 @@ class BatchDataSetIterator:
 
     def __init__(self, buffer: DataBuffer, batch_size):
 
-        self.__batches = []
+        self.__batches_input = None
+        self.__batches_output = None
 
         self.__batch_size = batch_size
 
@@ -15,32 +16,42 @@ class BatchDataSetIterator:
         self.reinitialize()
 
     def reinitialize(self):
+
+        self.__batches_input = []
+        self.__batches_output = []
+
         self.__buffer.initialize_get_random_unique()
 
-        unique_ele = self.__buffer.get_random_image_unique()
+        unique_ele = self.__buffer.get_random_unique()
 
         count = 0
-        unit_batch = []
-
+        unit_batch_input = []
+        unit_batch_output= []
         while unique_ele is not None:
-            unit_batch.append(unique_ele)
+            unit_batch_input.append(unique_ele[DataBuffer.DpType.INPUT_DP])
+            unit_batch_output.append(unique_ele[DataBuffer.DpType.OUTPUT_DP])
             if count >= self.__batch_size:
-                self.__batches.append(unit_batch)
-                unit_batch = []
+                self.__batches_input.append(unit_batch_input)
+                self.__batches_output.append(unit_batch_output)
+                unit_batch_input = []
+                unit_batch_output= []
                 count = 0
-            unique_ele = self.__buffer.get_random_image_unique()
+            unique_ele = self.__buffer.get_random_unique()
             count += 1
 
         self.__batch_counter = 0
 
     def get_next_batch(self):
 
-        if self.__batch_counter >= len(self.__batches):
+        if self.__batch_counter >= len(self.__batches_input):
             return None
 
-        result = self.__batches[self.__batch_counter]
+        input_batch = self.__batches_input[self.__batch_counter]
+        output_batch = self.__batches_output[self.__batch_counter]
+
         self.__batch_counter += 1
-        return result
+
+        return DataBuffer.create_input_output_dp(input_batch, output_batch)
 
     def reset_batch_iterator(self):
         self.__batch_counter = 0
@@ -53,6 +64,9 @@ class BatchDataSetIterator:
         if result is None:
             raise StopIteration
         return result
+
+    def __len__(self):
+        return len(self.__batches_input)
 
 
 if __name__ == '__main__':

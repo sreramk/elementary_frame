@@ -4,6 +4,7 @@ import random
 import cv2
 import numpy
 
+from prepare_dataset.data_set_buffer import DataBuffer
 from prepare_dataset.dataset_manager import DataSetManager
 from prepare_dataset.exceptions import InvalidDataSetLabel, StopPopulatingTrainOrTestBuffer
 from utils.general_utils import ensure_numpy_array
@@ -22,17 +23,16 @@ class SRDSManage(DataSetManager):
                  training_dimension=ORIGINAL_DIMENSION, testing_dimension=ORIGINAL_DIMENSION,
                  accepted_ext=DataSetManager.DEFAULT_IMG_EXTENSIONS
                  ):
-
-        super().__init__(train_ds_dir_list, test_ds_dir_list,
-                         num_of_training_ds_to_load, num_of_testing_ds_to_load,
-                         accepted_ext=accepted_ext)
-
         self.__training_dimension = training_dimension
         self.__testing_dimension = testing_dimension
 
         self.__train_down_sample = down_sample_train
 
         self.__test_down_sample = down_sample_test
+
+        super().__init__(train_ds_dir_list, test_ds_dir_list,
+                         num_of_training_ds_to_load, num_of_testing_ds_to_load,
+                         accepted_ext=accepted_ext)
 
     def set_train_downsample(self, new_frac):
         self.__train_down_sample = new_frac
@@ -46,6 +46,13 @@ class SRDSManage(DataSetManager):
     def get_test_downsample(self):
         return self.__test_down_sample
 
+    def _reset_get(self):
+        """
+        The get method will randomly acquire data. Thus, it is not required to define this function.
+        :return:
+        """
+        pass
+
     def _preprocessor(self, data, ds_label):
         """
         This returns an instance of a fully prepared data-point
@@ -53,10 +60,10 @@ class SRDSManage(DataSetManager):
         :return:
         """
 
-        if ds_label == DataSetManager.DS_TYPE.TRAINING:
+        if ds_label == DataSetManager.DsType.TRAINING:
             down_sample_fact = self.get_train_downsample()
             dimensions = self.__training_dimension
-        elif ds_label == DataSetManager.DS_TYPE.TESTING:
+        elif ds_label == DataSetManager.DsType.TESTING:
             down_sample_fact = self.get_test_downsample()
             dimensions = self.__testing_dimension
         else:
@@ -75,15 +82,15 @@ class SRDSManage(DataSetManager):
         data = ensure_numpy_array(data)
         down_sampled = ensure_numpy_array(down_sampled)
 
-        return [data, down_sampled]
+        return DataBuffer.create_input_output_dp(down_sampled, data)
 
     def _get_data(self, ds_label):
         directory = None
 
         try:
-            if ds_label == DataSetManager.DS_TYPE.TRAINING:
+            if ds_label == DataSetManager.DsType.TRAINING:
                 directory = self._get_train_dir_rand()
-            elif ds_label == DataSetManager.DS_TYPE.TESTING:
+            elif ds_label == DataSetManager.DsType.TESTING:
                 directory = self._get_test_dir_rand()
         except IndexError:
             raise StopPopulatingTrainOrTestBuffer

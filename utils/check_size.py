@@ -1,9 +1,7 @@
-import sys
-from numbers import Number
-from collections import Set, Mapping, deque
-
-import sys
 import inspect
+import sys
+from collections import Set, Mapping, deque
+from numbers import Number
 
 
 def get_size(obj, seen=None):
