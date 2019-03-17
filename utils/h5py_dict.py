@@ -1,5 +1,4 @@
 # copyright (c) 2019 K Sreram, All rights reserved
-
 import collections
 
 import h5py
@@ -104,8 +103,33 @@ class H5PyDict(collections.MutableMapping):
             for k in seq:
                 self.__create_or_replace(k, seq[k])
 
-    def get_storage_inst(self):
+    def get_h5py_storage_inst(self):
         return self.__h5py_storage
+
+    def get_storage_inst(self):
+        return self.__storage
+
+    def clear(self):
+        self.__storage.clear()
+
+    def setdefault(self, key, default=0):
+        self.set_create_replace_working_mode()
+        self.__create_or_replace(key, default)
+
+    def get(self, key):
+        return self.__getitem__(key)
+
+    def items(self):
+        return self.__storage.items()
+
+    def keys(self):
+        return self.__storage.keys()
+
+    def values(self):
+        return self.__storage.values()
+
+    def __contains__(self, o):
+        return self.__storage.__contains__(o)
 
     def __setitem__(self, k, v):
         self.__create_or_replace(k, v)

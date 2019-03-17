@@ -1,7 +1,7 @@
 # copyright (c) 2019 K Sreram, All rights reserved.
 
 # TODO break this class into multiple classes, to distinctly separate each functionality
-
+# TODO do not make rebasing automatic. Design to perfectly allow the user to call the rebasing function from outside.
 import contextlib
 import copy
 import datetime
@@ -64,7 +64,7 @@ class ModelSaver:
     H_CHECK_POINT_ID = "h_check_point_ID"  # this is the header key in the listing
     H_CHECK_POINT_NAME = "h_check_point_name"  # which is a combination of the ID and the name of the checkpoints stored
     H_CHECK_POINT_TIME_STAMP = "h_check_point_time_stamp"  # timestamp of creating the checkpoint
-    H_CHECK_POINT_EFFICIENCY = "h_check_point_efficiency"  # efficiency of the parameters recorded
+    H_CHECK_POINT_LOSS = "h_check_point_loss"  # loss of the parameters recorded
 
     # CHECKPOINT_STORE this is an attribute only available in the record and not the header. This is not to be confused
     # with h_check_point_store defined as the symbol H_CHECK_POINT_STORE which lists all the stored record's
@@ -84,7 +84,7 @@ class ModelSaver:
     REBASE_BEST_CHECKPOINT = "rebase_best_checkpoint"  # search for the best checkpoint and reload it
 
     REBASE_IGNORE_BAD_CHECKPOINT = "rebase_ ignore_bad_checkpoint"  # Revert to the previous checkpoint if the
-    # efficiency of the current is lesser
+    # loss of the current is lesser
 
     REBASE_CHECKPOINT_IGNORE = "rebase_checkpoint_ignore"  # signifies that no rebasing happens for each checkpoint
     # and the currently-active checkpoint will remain active.
@@ -206,6 +206,8 @@ class ModelSaver:
 
         self.__model_checkpoint_arguments = ModelSaver.checkpoint_model_default_args(with_namespace=False)
 
+        self.__model_rebase_ignore = None
+
     @staticmethod
     def __first(s):
         return next(iter(s))
@@ -216,20 +218,20 @@ class ModelSaver:
 
     @staticmethod
     def __create_record_header_structure(checkpoint_name, checkpoint_timestamp,
-                                         checkpoint_efficiency):
+                                         checkpoint_loss):
         return OrderedDict({
             ModelSaver.H_CHECK_POINT_NAME: checkpoint_name,
             ModelSaver.H_CHECK_POINT_TIME_STAMP: checkpoint_timestamp,
-            ModelSaver.H_CHECK_POINT_EFFICIENCY: checkpoint_efficiency
+            ModelSaver.H_CHECK_POINT_LOSS: checkpoint_loss
         })
 
     @staticmethod
     def __create_record_structure(checkpoint_id, checkpoint_name, checkpoint_timestamp,
-                                  checkpoint_efficiency, checkpoint_store):
+                                  checkpoint_loss, checkpoint_store):
         return OrderedDict({ModelSaver.H_CHECK_POINT_ID: checkpoint_id,
                             ModelSaver.H_CHECK_POINT_NAME: checkpoint_name,
                             ModelSaver.H_CHECK_POINT_TIME_STAMP: checkpoint_timestamp,
-                            ModelSaver.H_CHECK_POINT_EFFICIENCY: checkpoint_efficiency,
+                            ModelSaver.H_CHECK_POINT_LOSS: checkpoint_loss,
 
                             ModelSaver.CHECK_POINT_STORE: checkpoint_store
                             })
@@ -242,7 +244,7 @@ class ModelSaver:
                             ModelSaver.H_CHECK_POINT_STORE: checkpoint_store})
 
     __DEFAULT_CHECKPOINT_MODEL_ARGS = {
-        'checkpoint_efficiency': None,
+        'checkpoint_loss': None,
         'skip_type': TimeIterSkipManager.ST_ITER_SKIP,
         'skip_duration': TimeIterSkipManager.DEFAULT_SKIP,
         'checkpoint_type': DYNAMIC_CHECKPOINT,
@@ -250,7 +252,7 @@ class ModelSaver:
         'reset': False,
         'exec_on_checkpoint': None,
         'exec_on_first_run': None,
-        'running_avg_efficiency': True,
+        'running_avg_loss': True,
         'rebase_checkpoint': REBASE_BEST_CHECKPOINT,
         'rebase_best_checkpoint_radius': DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS,
         'show_rebase_status': True
@@ -465,11 +467,11 @@ class ModelSaver:
     def change_working_tensor_prams(self, new_tensor_prams):
         self.__converter_instance.change_tensors(new_tensor_prams)
 
-    def create_check_point(self, checkpoint_efficiency, checkpoint_type=DYNAMIC_CHECKPOINT,
+    def create_check_point(self, checkpoint_loss, checkpoint_type=DYNAMIC_CHECKPOINT,
                            checkpoint_id=LAST_CHECKPOINT, **args):
         """
 
-        :param checkpoint_efficiency:
+        :param checkpoint_loss:
         :param checkpoint_type: can either be static or dynamic. If it is static, the current designated checkpoint is
         replaced each time. If it is dynamic, each checkpoint creates a new record. And this continues on.
         :param checkpoint_id: only valid if checkpoint_type is STATIC_CHECKPOINT. This shows which checkpoint to use
@@ -479,10 +481,10 @@ class ModelSaver:
         """
         checkpoint_store = self.__converter_instance.get_pyprams(**args)
         if checkpoint_type == ModelSaver.DYNAMIC_CHECKPOINT:
-            self.__new_record(checkpoint_efficiency, checkpoint_store)
+            self.__new_record(checkpoint_loss, checkpoint_store)
         elif checkpoint_type == ModelSaver.STATIC_CHECKPOINT:
             checkpoint_id = self.__resolve_checkpoint_id(checkpoint_id, ModelSaver.NOT_IN_GET_METHOD)
-            self.__new_record(checkpoint_efficiency, checkpoint_store, checkpoint_id=checkpoint_id)
+            self.__new_record(checkpoint_loss, checkpoint_store, checkpoint_id=checkpoint_id)
 
     def delete_all_saved_states(self):
         checkpoint_store = self.__header[ModelSaver.H_CHECK_POINT_STORE]
@@ -511,16 +513,29 @@ class ModelSaver:
             raise AccessToUninitializedObject
         self.__time_iter_skip.force_execution()
 
-    def __rebase_ignore_bad_checkpoint(self, checkpoint_efficiency, old_latest_checkpoint_id, show_rebase_status,
+    class RebaseIgnoreCounter:
+        def __init__(self, count):
+            self.__ignore_count = count
+            self.__counter = 0
+
+        def execute_rebase(self):
+            if self.__ignore_count > self.__counter:
+                self.__counter += 1
+                return False
+            else:
+                self.__counter = 0
+                return True
+
+    def __rebase_ignore_bad_checkpoint(self, checkpoint_loss, old_latest_checkpoint_id, show_rebase_status,
                                        **args):
 
         checkpoint_store = self.__header[ModelSaver.H_CHECK_POINT_STORE]
 
-        last_efficiency = checkpoint_store[old_latest_checkpoint_id][ModelSaver.H_CHECK_POINT_EFFICIENCY]
+        last_loss = checkpoint_store[old_latest_checkpoint_id][ModelSaver.H_CHECK_POINT_LOSS]
 
-        if last_efficiency < checkpoint_efficiency:  # signifies that the last checkpoint is better
-            # TODO here "efficiency" means "not efficiency" or "loss". This naming must be corrected:
-            # Regardless if the name is changed, "efficiency" is treated as "loss". Correcting this
+        if last_loss < checkpoint_loss:  # signifies that the last checkpoint is better
+            # TODO here "loss" means "not loss" or "loss". This naming must be corrected:
+            # Regardless if the name is changed, "loss" is treated as "loss". Correcting this
             # will avoid confusion.
 
             # at this point, the actual latest_checkpoint_id will belong to the new checkpoint. But this method attempts
@@ -530,7 +545,7 @@ class ModelSaver:
             if show_rebase_status:
                 print("Rebasing to checkpoint: %d" % old_latest_checkpoint_id)
 
-    def __rebase_best_checkpoint(self, new_checkpoint_efficiency, old_latest_checkpoint_id,
+    def __rebase_best_checkpoint(self, new_checkpoint_loss, old_latest_checkpoint_id,
                                  rebase_best_checkpoint_radius, show_rebase_status,
                                  **args):
 
@@ -544,17 +559,20 @@ class ModelSaver:
         if query_result is None or len(query_result) == 0:
             return
 
-        # min_ele = min(query_result, key=lambda x: x[ModelSaver.H_CHECK_POINT_EFFICIENCY])
+        # min_ele = min(query_result, key=lambda x: x[ModelSaver.H_CHECK_POINT_LOSS])
 
         min_ele = self.__get_from_checkpoint_store(old_latest_checkpoint_id)
         for ele in query_result:
             if min_ele is None:
                 min_ele = ele
-            elif ele[ModelSaver.H_CHECK_POINT_EFFICIENCY] < min_ele[ModelSaver.H_CHECK_POINT_EFFICIENCY]:
+            elif (ele[ModelSaver.H_CHECK_POINT_LOSS] is not None) and \
+                    (min_ele[ModelSaver.H_CHECK_POINT_LOSS] is not None) and \
+                    (ele[ModelSaver.H_CHECK_POINT_LOSS] < min_ele[ModelSaver.H_CHECK_POINT_LOSS]):
                 min_ele = ele
 
-        if new_checkpoint_efficiency <= min_ele[ModelSaver.H_CHECK_POINT_EFFICIENCY]:
-            # avoid rebasing if the most recent record has the highest efficiency.
+        if min_ele[ModelSaver.H_CHECK_POINT_LOSS] is None or \
+                new_checkpoint_loss <= min_ele[ModelSaver.H_CHECK_POINT_LOSS]:
+            # avoid rebasing if the most recent record has the highest loss.
             return
 
         rebase_id = min_ele[ModelSaver.H_CHECK_POINT_ID]
@@ -572,7 +590,7 @@ class ModelSaver:
         """
         Default arguments:
 
-        checkpoint_efficiency=None,
+        checkpoint_loss=None,
         skip_type=TimeIterSkipManager.ST_ITER_SKIP,
         skip_duration=TimeIterSkipManager.DEFAULT_SKIP,
         checkpoint_type=DYNAMIC_CHECKPOINT,
@@ -580,7 +598,7 @@ class ModelSaver:
         reset=False,
         exec_on_checkpoint=None,
         exec_on_first_run=None,
-        running_avg_efficiency=True,
+        running_avg_loss=True,
         rebase_checkpoint=REBASE_BEST_CHECKPOINT,
         rebase_best_checkpoint_radius=DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS,
         show_rebase_status=True,
@@ -592,19 +610,20 @@ class ModelSaver:
         arguments = self.get_checkpoint_model_arguments()
         return self.__checkpoint_model(**arguments)
 
-    def __checkpoint_model(self, checkpoint_efficiency=None,
+    def __checkpoint_model(self, checkpoint_loss=None,
                            skip_type=TimeIterSkipManager.ST_ITER_SKIP,
                            skip_duration=TimeIterSkipManager.DEFAULT_SKIP,
                            checkpoint_type=DYNAMIC_CHECKPOINT,
                            checkpoint_id=(LATEST_CHECK_POINT_ID, LAST_CHECKPOINT), reset=False,
-                           exec_on_checkpoint=None, exec_on_first_run=None, running_avg_efficiency=True,
+                           exec_on_checkpoint=None, exec_on_first_run=None, running_avg_loss=True,
                            rebase_checkpoint=REBASE_BEST_CHECKPOINT,
                            rebase_best_checkpoint_radius=DEFAULT_REBASE_BEST_CHECKPOINT_RADIUS,
                            show_rebase_status=True,
                            **args):
         """
-        TODO: checkpoint_efficiency must be renamed to "loss" or something else signifying loss:
-                `checkpoint_efficiency' will be treated that way, henceforth.
+        TODO: this method is too clumsy. Need to reorder its structure.
+        One way to do this will be to separate the automatic rebasing and make the rebasing fully controllable by the
+        developer.
 
         This is called periodically to actually checkpoint the model's state
         :return: Returns True when a checkpoint is made and False otherwise.
@@ -613,10 +632,17 @@ class ModelSaver:
         if self.__ensure_first_run() or reset:
             checkpoint_id = self.__resolve_checkpoint_id(checkpoint_id, ModelSaver.NOT_IN_GET_METHOD)
 
+            if rebase_best_checkpoint_radius is not None and \
+                    rebase_checkpoint == ModelSaver.REBASE_IGNORE_BAD_CHECKPOINT:
+                self.__model_rebase_ignore = ModelSaver.RebaseIgnoreCounter(rebase_best_checkpoint_radius[1] -
+                                                                            rebase_best_checkpoint_radius[0])
+            else:
+                self.__model_rebase_ignore = ModelSaver.RebaseIgnoreCounter(1)
+
             if checkpoint_type == ModelSaver.DYNAMIC_CHECKPOINT:
                 if checkpoint_id is None:
                     # creates a checkpoint if this is the first checkpoint
-                    self.create_check_point(checkpoint_efficiency=checkpoint_efficiency,
+                    self.create_check_point(checkpoint_loss=checkpoint_loss,
                                             checkpoint_type=checkpoint_type,
                                             checkpoint_id=checkpoint_id, **args)
                 else:
@@ -626,7 +652,7 @@ class ModelSaver:
             elif checkpoint_type == ModelSaver.STATIC_CHECKPOINT:
                 if checkpoint_id is not None:
                     if not self.load_checkpoint(checkpoint_id=checkpoint_id, reset=False, **args):
-                        self.create_check_point(checkpoint_efficiency=checkpoint_efficiency,
+                        self.create_check_point(checkpoint_loss=checkpoint_loss,
                                                 checkpoint_type=checkpoint_type,
                                                 checkpoint_id=checkpoint_id, **args)
                 else:
@@ -637,12 +663,12 @@ class ModelSaver:
             if exec_on_first_run is not None:
                 exec_on_first_run()
 
-        if running_avg_efficiency and checkpoint_efficiency is not None:
-            self.__running_avg_in_checkpoint_model.add_to_avg(checkpoint_efficiency)
+        if running_avg_loss and checkpoint_loss is not None:
+            self.__running_avg_in_checkpoint_model.add_to_avg(checkpoint_loss)
 
         if self.__time_iter_skip.check_execute_checkpoint():
 
-            checkpoint_efficiency = self.__running_avg_in_checkpoint_model.get_avg()
+            checkpoint_loss = self.__running_avg_in_checkpoint_model.get_avg()
             self.__running_avg_in_checkpoint_model.reset()
 
             old_latest_checkpoint_id = None  # latest checkpoint, before the new checkpoint gets added.
@@ -654,17 +680,19 @@ class ModelSaver:
                     # signifies that there does not exist a "latest checkpoint id" at this point.
                     pass
 
-            self.create_check_point(checkpoint_efficiency=checkpoint_efficiency, checkpoint_type=checkpoint_type,
+            self.create_check_point(checkpoint_loss=checkpoint_loss, checkpoint_type=checkpoint_type,
                                     checkpoint_id=checkpoint_id, **args)
 
             if old_latest_checkpoint_id is not None:
                 if rebase_checkpoint == ModelSaver.REBASE_IGNORE_BAD_CHECKPOINT:
-                    self.__rebase_ignore_bad_checkpoint(checkpoint_efficiency, old_latest_checkpoint_id,
+                    if self.__model_rebase_ignore.execute_rebase():
+                        self.__rebase_ignore_bad_checkpoint(checkpoint_loss, old_latest_checkpoint_id,
                                                         show_rebase_status, **args)
                 elif rebase_checkpoint == ModelSaver.REBASE_BEST_CHECKPOINT:
-                    self.__rebase_best_checkpoint(checkpoint_efficiency, old_latest_checkpoint_id,
-                                                  rebase_best_checkpoint_radius,
-                                                  show_rebase_status, **args)
+                    if self.__model_rebase_ignore.execute_rebase():
+                        self.__rebase_best_checkpoint(checkpoint_loss, old_latest_checkpoint_id,
+                                                      rebase_best_checkpoint_radius,
+                                                      show_rebase_status, **args)
             if exec_on_checkpoint is not None:
                 exec_on_checkpoint()
 
@@ -710,7 +738,7 @@ class ModelSaver:
     def query_checkpoint_info(self, check_point_id_range=None,
                               check_point_time_range=None,
                               check_point_serial_number_range=None,
-                              check_point_efficiency_range=None,
+                              check_point_loss_range=None,
                               left_range=CLOSED,
                               right_range=CLOSED):
         """
@@ -724,7 +752,7 @@ class ModelSaver:
                                                 value representing the ID, the position in the listing represents the
                                                 serial number. That is, it is just the record count range, starting from
                                                 the beginning.
-        :param check_point_efficiency_range:
+        :param check_point_loss_range:
         :return: the record details which can be used to load the data. This is a list of dictionaries. Each dictionary
                  contains all the attributes describing a record along with its record id, associated with their
                  respective flags.
@@ -733,7 +761,7 @@ class ModelSaver:
             'check_point_id_range': check_point_id_range,
             'check_point_time_range': check_point_time_range,
             'check_point_serial_number_range': check_point_serial_number_range,
-            'check_point_efficiency_range': check_point_efficiency_range
+            'check_point_loss_range': check_point_loss_range
         }
 
         field_name = self.__ensure_exactly_one_field(**arguments)
@@ -781,7 +809,7 @@ class ModelSaver:
             #  H_CHECK_POINT_ID
             #  H_CHECK_POINT_NAME
             #  H_CHECK_POINT_TIME_STAMP
-            #  H_CHECK_POINT_EFFICIENCY
+            #  H_CHECK_POINT_LOSS
 
             # temp = copy.deepcopy(checkpoint_store[checkpoint_id])
             # temp[ModelSaver.H_CHECK_POINT_ID] = checkpoint_id
@@ -803,7 +831,7 @@ class ModelSaver:
                 except StopIteration:
                     break
 
-                value = key(rec_id)  # checkpoint_store[rec_id][ModelSaver.H_CHECK_POINT_EFFICIENCY]
+                value = key(rec_id)  # checkpoint_store[rec_id][ModelSaver.H_CHECK_POINT_LOSS]
                 if value > end:
                     break
 
@@ -841,31 +869,31 @@ class ModelSaver:
 
             return result
 
-        elif field_name == 'check_point_efficiency_range':
+        elif field_name == 'check_point_loss_range':
 
-            def efficiency_key(cur_id):
-                return checkpoint_store[cur_id][ModelSaver.H_CHECK_POINT_EFFICIENCY]
+            def loss_key(cur_id):
+                return checkpoint_store[cur_id][ModelSaver.H_CHECK_POINT_LOSS]
 
-            range_match_store(check_point_efficiency_range, key=efficiency_key)
+            range_match_store(check_point_loss_range, key=loss_key)
 
-            result.sort(key=efficiency_key)
+            result.sort(key=loss_key)
 
             return result
 
     def __add_header_record_to_header(self, checkpoint_id, checkpoint_name, checkpoint_timestamp,
-                                      checkpoint_efficiency, commit=True):
+                                      checkpoint_loss, commit=True):
         self.__header[ModelSaver.H_NUM_OF_CHECK_POINT] += 1
         self.__header[ModelSaver.H_LATEST_CHECK_POINT_ID] = checkpoint_id
         checkpoint_store = self.__header[ModelSaver.H_CHECK_POINT_STORE]
         new_header = self.__create_record_header_structure(checkpoint_name,
                                                            checkpoint_timestamp,
-                                                           checkpoint_efficiency)
+                                                           checkpoint_loss)
         checkpoint_store[checkpoint_id] = new_header
 
         if commit:
             self.___save_header()
 
-    def __new_record(self, checkpoint_efficiency, checkpoint_store, checkpoint_id=None, commit=True):
+    def __new_record(self, checkpoint_loss, checkpoint_store, checkpoint_id=None, commit=True):
         if checkpoint_id is None:
             checkpoint_id = self.__get_new_checkpoint_id()
         checkpoint_id = self.__resolve_checkpoint_id(checkpoint_id, ModelSaver.NOT_IN_GET_METHOD)
@@ -874,10 +902,10 @@ class ModelSaver:
         self.__checkpoint_record = self.__create_record_structure(checkpoint_id,
                                                                   checkpoint_name,
                                                                   checkpoint_timestamp,
-                                                                  checkpoint_efficiency,
+                                                                  checkpoint_loss,
                                                                   checkpoint_store)
         self.__add_header_record_to_header(checkpoint_id, checkpoint_name,
-                                           checkpoint_timestamp, checkpoint_efficiency, commit)
+                                           checkpoint_timestamp, checkpoint_loss, commit)
         self.__save_checkpoint_record()
 
     def __new_header(self, commit=True):

@@ -51,7 +51,7 @@ class H5PyRandDict(RandomDict):
         try:
             self.__storage_key_to_sno = H5PyDict(working_dir=self.__working_dir, database_name=self.__database_name,
                                              h5py_group_path=key_to_sno_dbpath)
-            self.__h5py_store = self.__storage_key_to_sno.get_storage_inst()
+            self.__h5py_store = self.__storage_key_to_sno.get_h5py_storage_inst()
         except InitializationError:
             self.__storage_key_to_sno = H5PyDict(h5py_storage_inst=self.__h5py_store, group_inst=self.__group_inst,
                                                  h5py_group_path=key_to_sno_dbpath)
