@@ -9,3 +9,7 @@ def ensure_numpy_array(img):
         return numpy.array(img)
     else:
         return img
+
+
+def check_if_numpy_array(img):
+    return type(img) is numpy.ndarray

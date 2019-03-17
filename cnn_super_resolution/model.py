@@ -15,11 +15,11 @@ from model_saver_manager.exceptions import CheckpointCannotBeFirstRun
 from prepare_dataset.batch_dataset_iterator import BatchDataSetIterator
 from prepare_dataset.data_set_buffer import DataBuffer
 from prepare_dataset.dataset_manager import DataSetManager
-from prepare_dataset.sr_image_ds_manager import ImageDSManage
 from trainer.exceptions import LossUninitialized, LossOptimizerUninitialized, RequiredPlaceHolderNotInitialized, \
     TrainDatasetNotInitialized, TestDatasetNotInitialized, SaveInstanceNotInitialized, ModelNotInitialized, \
     ParameterNotInitialized, InvalidArgumentCombination, InvalidType
 from trainer.model_base import ModelBase
+from utils.general_utils import ensure_numpy_array
 from utils.running_avg import RunningAvg
 
 
@@ -116,18 +116,18 @@ class SRModel(ModelBase):
 
         input_image = numpy.float32(input_image) / 255.0
 
-        input_image = ImageDSManage.ensure_numpy_array(input_image)
+        input_image = ensure_numpy_array(input_image)
 
         if len(input_image.shape) == 3 and with_batch_column:
             input_image = [input_image]
 
-        input_image = ImageDSManage.ensure_numpy_array(input_image)
+        input_image = ensure_numpy_array(input_image)
 
         return input_image
 
     @staticmethod
     def get_image_dimensions(img):
-        if ImageDSManage.check_if_numpy_array(img):
+        if check_if_numpy_array(img):
             size_y = len(img)
             size_x = len(img[0])
             return size_x, size_y
@@ -146,7 +146,7 @@ class SRModel(ModelBase):
                             dsize=(int(len(img[0]) * zoom_factor_x),
                                    int(len(img) * zoom_factor_y)),
                             interpolation=cv2.INTER_NEAREST)
-        return ImageDSManage.ensure_numpy_array(result)
+        return ensure_numpy_array(result)
 
     def __create_place_holders(self):
         self.__input_data = tf.placeholder(dtype=tf.float32, shape=[None, None, None, None])
@@ -508,7 +508,7 @@ class SRModel(ModelBase):
             input_image = cv2.imread(input_image_path)
             input_image = numpy.float32(input_image) / 255.0
 
-        input_image = ImageDSManage.ensure_numpy_array(input_image)
+        input_image = ensure_numpy_array(input_image)
 
         if len(input_image.shape) == 3:
             input_image = [input_image]
@@ -530,7 +530,7 @@ class SRModel(ModelBase):
             sess.close()
 
         if not return_with_batch_column:
-            return ImageDSManage.ensure_numpy_array(img_result[0][0])
+            return ensure_numpy_array(img_result[0][0])
 
         return img_result[0]
 
@@ -576,7 +576,7 @@ if __name__ == "__main__":
 
         #modelsave.checkpoint_model_arguments(skip_duration=100)
         #model_instance.run_train(num_of_epochs=1)
-        # _, __, img = ImageDSManage.random_crop(img, 250, 250)
+        #_, __, img = DataSetManager.random_crop(img, 250, 250)
         img = model_instance.zoom_image(img, 4, 4)
         for i in range(20):
             cv2.imshow("im1", img)
