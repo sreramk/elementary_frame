@@ -396,13 +396,13 @@ class SRModel(ModelBase):
                         self.__model_saver_inst.checkpoint_model_arguments\
                             (rebase_checkpoint=ModelSaver.REBASE_CHECKPOINT_IGNORE)
 
-                        self.__model_saver_inst.checkpoint_model(checkpoint_efficiency=None,
+                        self.__model_saver_inst.checkpoint_model(checkpoint_loss=None,
                                                                  exec_on_first_run=get_train_loss,
                                                                  sess=sess)
 
                     self.__run_optimizer(sess, input_batch, output_batch, optimizer)
 
-                    if display_status and display_status_iter % iteration_count == 0:
+                    if display_status and  iteration_count % display_status_iter == 0:
                         if not running_avg_usage:
                             get_train_loss()
                         else:
@@ -427,7 +427,7 @@ class SRModel(ModelBase):
                     self.__model_saver_inst.force_checkpoint_model_execution()
                     self.__model_saver_inst.checkpoint_model_arguments \
                         (rebase_checkpoint=ModelSaver.REBASE_BEST_CHECKPOINT)
-                    self.__model_saver_inst.checkpoint_model(checkpoint_efficiency=cur_test_loss[0],
+                    self.__model_saver_inst.checkpoint_model(checkpoint_loss=cur_test_loss[0],
                                                              exec_on_first_run=checkpoint_not_first_run,
                                                              sess=sess)
                 if display_status:
@@ -470,8 +470,9 @@ class SRModel(ModelBase):
             init = tf.initialize_all_variables()
             sess.run(init)
 
-        # loads the most recently used checkpoint.
-        self.__model_saver_inst.load_checkpoint(sess=sess)
+            # loads the most recently used checkpoint.
+            self.__model_saver_inst.load_checkpoint(sess=sess)
+
         if reinitialize_batches:
             self.__test_ds_container = self.__ds_manage.manufacture_test_batch_iterator(batch_size)
         else:
@@ -558,24 +559,26 @@ if __name__ == "__main__":
 
         model_instance.set_model_saver_inst(modelsave)
 
-        model_instance.prepare_train_test_dataset(
-            ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_train_HR/'],
-            ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/'],
-            num_of_training_ds_to_load=160, num_of_testing_ds_to_load=40,
-            train_batch_size=10, testing_dimension=(500, 500)
-        )
+        #model_instance.prepare_train_test_dataset(
+        #    ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_train_HR/'],
+        #    ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/'],
+        #    num_of_training_ds_to_load=160, num_of_testing_ds_to_load=40,
+        #    train_batch_size=10, testing_dimension=(500, 500)
+        #)
 
         model_instance.set_rms_loss()
-        model_instance.run_test()
-        print("active loss: " + model_instance.get_active_loss())
+        #model_instance.run_test()
+        #print("active loss: " + model_instance.get_active_loss())
 
-        img = model_instance.fetch_image('/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/0848.png',
+        img = model_instance.fetch_image('/media/sreramk/storage-main/elementary_frame/dataset/t2.png', #'/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/0891.png',
                                          with_batch_column=False)
         # model_instance.display_image(img)
-        model_instance.run_train(num_of_epochs=100)
-        for i in range(3):
-            _, __, img = ImageDSManage.random_crop(img, 250, 250)
-            img = model_instance.zoom_image(img, 4, 4)
+
+        #modelsave.checkpoint_model_arguments(skip_duration=100)
+        #model_instance.run_train(num_of_epochs=1)
+        # _, __, img = ImageDSManage.random_crop(img, 250, 250)
+        img = model_instance.zoom_image(img, 4, 4)
+        for i in range(20):
             cv2.imshow("im1", img)
             # model_instance.display_image(img)
             result = model_instance.execute_model(input_image=img, return_with_batch_column=False)
