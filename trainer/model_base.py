@@ -1,8 +1,4 @@
 # copyright (c) 2019 K Sreram, All rights reserved.
-import cv2
-
-import numpy
-import matplotlib.pyplot as plt
 
 from trainer.exceptions import RunTrainerMustBeOverridden, RunTestMustBeOverridden, ExecuteModelMustBeOverridden, \
     GetModelMustBeOverridden, GetParameterTensorsMustBeOverridden, PrepareTrainTestDatasetMustBeOverridden, \

@@ -1,7 +1,8 @@
 # copyright (c) 2019 K Sreram, All rights reserved.
 
 # TODO break this class into multiple classes, to distinctly separate each functionality
-# TODO do not make rebasing automatic. Design to perfectly allow the user to call the rebasing function from outside.
+# TODO do not make rebasing automatic. Design to allow the user to perform rebasing through direct calls.
+# This is because, different situations require different types of rebasing.
 import contextlib
 import copy
 import datetime
@@ -180,7 +181,8 @@ class ModelSaver:
                 raise InvalidArgumentType
 
     def __init__(self, save_name, tensor_prams, save_file_path=os.getcwd(),
-                 check_point_digits=5, extension=DEFAULT_EXTENSION, reset=False, model_type=MT_TENSORFLOW):
+                 check_point_digits=5, extension=DEFAULT_EXTENSION, reset=False, model_type=MT_TENSORFLOW,
+                 rebase_periodic=False):
 
         self.__save_file_path = save_file_path  # path to store the checkpoints.
         self.__save_name = save_name  # name of the saving instance. used in naming the files.
@@ -207,6 +209,8 @@ class ModelSaver:
         self.__model_checkpoint_arguments = ModelSaver.checkpoint_model_default_args(with_namespace=False)
 
         self.__model_rebase_ignore = None
+
+        self.__model_rebase_periodic = rebase_periodic
 
     @staticmethod
     def __first(s):
@@ -514,17 +518,31 @@ class ModelSaver:
         self.__time_iter_skip.force_execution()
 
     class RebaseIgnoreCounter:
-        def __init__(self, count):
+
+        def __init__(self, count, is_periodic):
+            """
+
+            :param count:
+            :param is_periodic: if true, rebasing will be periodic, skipping the first count number of iterations.
+                                else, the rebase will happen always.
+            """
             self.__ignore_count = count
             self.__counter = 0
 
-        def execute_rebase(self):
-            if self.__ignore_count > self.__counter:
-                self.__counter += 1
-                return False
-            else:
-                self.__counter = 0
-                return True
+            def execute_rebase():
+                if self.__ignore_count > self.__counter:
+                    self.__counter += 1
+                    return False
+                else:
+                    self.__counter = 0
+                    if not is_periodic:
+                        def always_be_true():
+                            return True
+
+                        self.execute_rebase = always_be_true
+                    return True
+
+            self.execute_rebase = execute_rebase
 
     def __rebase_ignore_bad_checkpoint(self, checkpoint_loss, old_latest_checkpoint_id, show_rebase_status,
                                        **args):
@@ -635,9 +653,10 @@ class ModelSaver:
             if rebase_best_checkpoint_radius is not None and \
                     rebase_checkpoint == ModelSaver.REBASE_IGNORE_BAD_CHECKPOINT:
                 self.__model_rebase_ignore = ModelSaver.RebaseIgnoreCounter(rebase_best_checkpoint_radius[1] -
-                                                                            rebase_best_checkpoint_radius[0])
+                                                                            rebase_best_checkpoint_radius[0],
+                                                                            self.__model_rebase_periodic)
             else:
-                self.__model_rebase_ignore = ModelSaver.RebaseIgnoreCounter(1)
+                self.__model_rebase_ignore = ModelSaver.RebaseIgnoreCounter(1, self.__model_rebase_periodic)
 
             if checkpoint_type == ModelSaver.DYNAMIC_CHECKPOINT:
                 if checkpoint_id is None:
@@ -687,7 +706,7 @@ class ModelSaver:
                 if rebase_checkpoint == ModelSaver.REBASE_IGNORE_BAD_CHECKPOINT:
                     if self.__model_rebase_ignore.execute_rebase():
                         self.__rebase_ignore_bad_checkpoint(checkpoint_loss, old_latest_checkpoint_id,
-                                                        show_rebase_status, **args)
+                                                            show_rebase_status, **args)
                 elif rebase_checkpoint == ModelSaver.REBASE_BEST_CHECKPOINT:
                     if self.__model_rebase_ignore.execute_rebase():
                         self.__rebase_best_checkpoint(checkpoint_loss, old_latest_checkpoint_id,

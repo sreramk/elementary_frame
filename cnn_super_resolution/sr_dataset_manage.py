@@ -48,7 +48,7 @@ class SRDSManage(DataSetManager):
 
     def _reset_get(self):
         """
-        The get method will randomly acquire data. Thus, it is not required to define this function.
+        This will only be required if the get method acquires random data.
         :return:
         """
         pass
@@ -79,7 +79,11 @@ class SRDSManage(DataSetManager):
         down_sampled = cv2.resize(down_sampled, dsize=(len(data[0]), len(data)),
                                   interpolation=cv2.INTER_NEAREST)
 
+        # down_sampled = cv2.GaussianBlur(down_sampled, (3, 3), 0)
+
         data = ensure_numpy_array(data)
+        # data = 1-data
+        data = numpy.flip(data, axis=0)
         down_sampled = ensure_numpy_array(down_sampled)
 
         return DataBuffer.create_input_output_dp(down_sampled, data)
