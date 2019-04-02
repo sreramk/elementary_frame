@@ -2,8 +2,8 @@
 import h5py
 import numpy
 
+from h5py_wrappers.h5py_dict import H5PyDict
 from utils import RandomDict
-from h5py_wrappers import H5PyDict
 
 
 class H5PyRandDict(RandomDict):
@@ -22,7 +22,7 @@ class H5PyRandDict(RandomDict):
         def __next__(self):
             return next(self.__keys_iter)
 
-    def __init__(self, storage_inst:h5py.Group, seq=None, **kwargs):
+    def __init__(self, storage_inst: h5py.Group, seq=None, **kwargs):
 
         self.__storage_inst = storage_inst
 
@@ -35,7 +35,9 @@ class H5PyRandDict(RandomDict):
                          inst_key_to_val=self.__storage_key_to_val, **kwargs)
 
     def create_memory_friendly_copy(self, working_dir=None):
-        return H5PyRandDict(storage_inst=self.__storage_inst.require_group("temp/"))
+        if working_dir is None:
+            working_dir = "temp/"
+        return H5PyRandDict(storage_inst=self.__storage_inst.require_group(working_dir))
 
     @staticmethod
     def prepare_key(key):
@@ -63,3 +65,32 @@ class H5PyRandDict(RandomDict):
         self.__storage_key_to_val.get_working_mode().set_replace_working_mode()
 
         super().__delitem__(key)
+
+    def get_element(self, key):
+        return self._key_to_val[numpy.array(key)]
+
+
+def run():
+    hf = h5py.File('/media/sreramk/storage-main/elementary_frame/test_dbs/data.h5', 'a')
+    g = hf.require_group("/hello/world/dbstore3/")
+    inst_dict = H5PyRandDict(g)
+    inst_dict.clear()
+    inst_dict.add_element("a", 1)
+    inst_dict.add_element("b", 2)
+    inst_dict.add_element("c", 3)
+    inst_dict.add_element("d", 4)
+    inst_dict.add_element("e", 5)
+
+    print(numpy.array(inst_dict.random_value()))
+    print(numpy.array(inst_dict.random_value()))
+    print(numpy.array(inst_dict.random_value()))
+    print(numpy.array(inst_dict.random_value()))
+    print(numpy.array(inst_dict.random_value()))
+    print(numpy.array(inst_dict.random_value()))
+
+    print(str(inst_dict))
+
+    print (len(inst_dict))
+
+if __name__ == '__main__':
+    run()

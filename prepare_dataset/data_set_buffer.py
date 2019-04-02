@@ -19,12 +19,10 @@ class DataBuffer:
         LESSER = 'lesser'
         EQUAL = 'equal'
 
-    class DpType(Enum):
-        INPUT_DP = "input_data_point"
-        OUTPUT_DP = "output_data_point"
-
-    def __init__(self, buffer_max_size=SIZE_UNLIMITED):
-        self.__rand_query_store = RandomDict()  # dictionary that allows a random key to be returned in O(1) time
+    def __init__(self, buffer_max_size=SIZE_UNLIMITED, rnd_dict_inst=None):
+        if rnd_dict_inst is None:
+            rnd_dict_inst = RandomDict()
+        self.__rand_query_store = rnd_dict_inst  # dictionary that allows a random key to be returned in O(1) time
         self.__buffer_max_size = buffer_max_size
 
         self.__rand_query_store_unique = None
@@ -46,26 +44,16 @@ class DataBuffer:
             return DataBuffer.COMPARE.EQUAL
 
     @staticmethod
-    def __exception_on_non_dp(data_point):
-        input_dp = DataBuffer.DpType.INPUT_DP
-        output_dp = DataBuffer.DpType.OUTPUT_DP
-        # the first data-value is the input and the second data-value is the output in the data-point
-
-        if not all((isinstance(data_point, collections.Mapping), input_dp in data_point, output_dp in data_point)):
-            raise InvalidDataPointDefinition
-
-    @staticmethod
     def create_input_output_dp(input_dp, output_dp):
-        return {DataBuffer.DpType.INPUT_DP: input_dp,
-                DataBuffer.DpType.OUTPUT_DP: output_dp}
+        return [ input_dp, output_dp]
 
     @staticmethod
     def get_input_dict_dp(io_dp):
-        return ensure_numpy_array(io_dp[DataBuffer.DpType.INPUT_DP])
+        return ensure_numpy_array(io_dp[0])
 
     @staticmethod
     def get_output_dict_dp(io_dp):
-        return ensure_numpy_array(io_dp[DataBuffer.DpType.OUTPUT_DP])
+        return ensure_numpy_array(io_dp[1])
 
     def is_buffer_full(self):
         compare = DataBuffer.__comp_buffer_size(self.__rand_query_store, self.__buffer_max_size)
@@ -83,7 +71,7 @@ class DataBuffer:
         """
         # img = general_utils.ensure_numpy_array(img)
 
-        DataBuffer.__exception_on_non_dp(data_point)
+        # DataBuffer.__exception_on_non_dp(data_point)
 
         if self.is_buffer_full():
             raise BufferOverflow
@@ -95,7 +83,7 @@ class DataBuffer:
         if buffer_max_size != DataBuffer.SAME:
             self.__buffer_max_size = buffer_max_size
 
-        self.__rand_query_store = RandomDict()
+        self.__rand_query_store.clear()
 
     def get_data(self, key):
         try:

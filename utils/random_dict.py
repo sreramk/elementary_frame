@@ -7,7 +7,6 @@ from utils.exceptions import KeyDoesNotExist
 
 
 class RandomDict(collections.MutableMapping):
-
     KEY_TO_SNO = "key_to_sno"
     SNO_TO_KEY = "sno_to_key"
     KEY_TO_VAL = "key_to_val"
@@ -20,18 +19,21 @@ class RandomDict(collections.MutableMapping):
             inst_sno_to_key = {}
             inst_key_to_val = {}
 
-        self.__key_to_sno = inst_key_to_sno
-        self.__sno_to_key = inst_sno_to_key
-        self.__key_to_val = inst_key_to_val
+        self._key_to_sno = inst_key_to_sno
+        self._sno_to_key = inst_sno_to_key
+        self._key_to_val = inst_key_to_val
 
         self.update(seq, **kwargs)
 
     def get_element(self, key):
-        return self.__key_to_val[key]
+        return self._key_to_val[key]
+
+    def __set_element_low(self, key, value):
+        self._key_to_val[key] = value
 
     def set_element(self, key, value):
-        if key in self.__key_to_val:
-            self.__key_to_val[key] = value
+        if key in self._key_to_val:
+            self.__set_element_low(key, value)
         else:
             raise KeyDoesNotExist
 
@@ -42,42 +44,42 @@ class RandomDict(collections.MutableMapping):
         :param value: The reference is transferred. A new instance does not get created
         :return:
         """
-        if key not in self.__key_to_val:
-            self.__sno_to_key[len(self.__sno_to_key)] = key
-            self.__key_to_sno[key] = len(self.__key_to_sno)
+        if key not in self._key_to_val:
+            self._sno_to_key[len(self._sno_to_key)] = key
+            self._key_to_sno[key] = len(self._key_to_sno)
 
-        self.__key_to_val[key] = value
+        self.__set_element_low(key, value)
 
     def delete_element(self, del_key):
 
-        if del_key not in self.__key_to_val:
+        if del_key not in self._key_to_val:
             return None
 
-        sno_del_key = self.__key_to_sno[del_key]
-        sno_end_key = len(self.__key_to_sno) - 1
+        sno_del_key = self._key_to_sno[del_key]
+        sno_end_key = len(self._key_to_sno) - 1
 
-        end_key = self.__sno_to_key[sno_end_key]
+        end_key = self._sno_to_key[sno_end_key]
 
-        self.__sno_to_key[sno_del_key], self.__sno_to_key[sno_end_key] = \
-            self.__sno_to_key[sno_end_key], self.__sno_to_key[sno_del_key]
+        self._sno_to_key[sno_del_key], self._sno_to_key[sno_end_key] = \
+            self._sno_to_key[sno_end_key], self._sno_to_key[sno_del_key]
 
-        self.__key_to_sno[end_key] = sno_del_key
+        self._key_to_sno[end_key] = sno_del_key
 
-        del self.__key_to_sno[del_key]
-        del self.__sno_to_key[len(self.__sno_to_key) - 1]
-        del self.__key_to_val[del_key]
+        del self._key_to_sno[del_key]
+        del self._sno_to_key[len(self._sno_to_key) - 1]
+        del self._key_to_val[del_key]
 
     def random_key(self):
-        if len(self.__sno_to_key) == 0:
+        if len(self._sno_to_key) == 0:
             raise KeyDoesNotExist
-        return self.__sno_to_key[random.randrange(0, len(self.__sno_to_key))]
+        return self._sno_to_key[random.randrange(0, len(self._sno_to_key))]
 
     def random_value(self):
-        return self.__key_to_val[self.random_key()]
+        return self.get_element(self.random_key())
 
     def random_key_value(self):
         key = self.random_key()
-        val = self.__key_to_val[key]
+        val = self.get_element(key)
         return key, val
 
     def create_memory_friendly_copy(self):
@@ -88,7 +90,7 @@ class RandomDict(collections.MutableMapping):
         of key-value pairs
         :return:
         """
-        return RandomDict(self.__key_to_val)
+        return RandomDict(self._key_to_val)
 
     def update(self, seq, **kwargs):
         if kwargs is not None:
@@ -100,15 +102,15 @@ class RandomDict(collections.MutableMapping):
                 self.add_element(k, seq[k])
 
     def __str__(self):
-        return "Key to serial number: " + str(self.__key_to_sno) + \
-               "\n" + "Serial number to key: " + str(self.__sno_to_key) + "\n Key to value: " + \
-               str(self.__key_to_val)
+        return "Key to serial number: " + str(self._key_to_sno) + \
+               "\n" + "Serial number to key: " + str(self._sno_to_key) + "\n Key to value: " + \
+               str(self._key_to_val)
 
     def __len__(self):
-        return len(self.__key_to_val)
+        return len(self._key_to_val)
 
     def __contains__(self, item):
-        return item in self.__key_to_val
+        return item in self._key_to_val
 
     def __delitem__(self, key):
         self.delete_element(key)
@@ -117,13 +119,18 @@ class RandomDict(collections.MutableMapping):
         return self.get_element(key)
 
     def __iter__(self):
-        return iter(self.__key_to_val)
+        return iter(self._key_to_val)
 
     def __setitem__(self, key, value):
         self.add_element(key, value)
 
     def items(self):
-        return self.__key_to_val.items()
+        return self._key_to_val.items()
+
+    def clear(self):
+        self._key_to_sno.clear()
+        self._sno_to_key.clear()
+        self._key_to_val.clear()
 
 
 if __name__ == "__main__":

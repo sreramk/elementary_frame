@@ -3,8 +3,8 @@ import collections
 
 import h5py
 
+from h5py_wrappers.h5py_working_mode import H5PyWorkingMode
 from utils.exceptions import InitializationError
-from h5py_wrappers import H5PyWorkingMode
 
 
 class H5PyDict(collections.MutableMapping):
@@ -82,13 +82,13 @@ class H5PyDict(collections.MutableMapping):
         return self.__storage.__contains__(o)
 
     def __setitem__(self, k, v):
-        self.__create_or_replace(k, v)
+        self.__create_or_replace(str(k), v)
 
     def __delitem__(self, key):
-        del self.__storage[key]
+        del self.__storage[str(key)]
 
     def __getitem__(self, key):
-        return self.__storage[key]
+        return self.__storage[str(key)]
 
     def __len__(self):
         return len(self.__storage)
@@ -99,14 +99,19 @@ class H5PyDict(collections.MutableMapping):
     def __str__(self):
         return str(dict(self.__storage.items()))
 
+
 def run():
     hf = h5py.File('/media/sreramk/storage-main/elementary_frame/test_dbs/data.h5', 'a')
     g = hf.require_group("/hello/world/dbstore2/")
-    print (g)
+    print(g)
     dict_inst = H5PyDict(g)
-    dict_inst["a"] = [1,2,3]
-    dict_inst["b"] = [1,2,3]
-    dict_inst["c"] = [1,2,3]
-    print (str(dict_inst))
+    dict_inst.clear()
+    dict_inst["a"] = [1, 2, 3]
+    dict_inst["b"] = [1, 2, 3]
+    dict_inst["c"] = [1, 2, 3]
+
+    print(str(dict_inst))
+
+
 if __name__ == '__main__':
     run()

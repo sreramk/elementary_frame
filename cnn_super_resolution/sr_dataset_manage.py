@@ -83,7 +83,7 @@ class SRDSManage(DataSetManager):
 
         data = ensure_numpy_array(data)
         # data = 1-data
-        data = numpy.flip(data, axis=0)
+        # data = numpy.flip(data, axis=0)
         down_sampled = ensure_numpy_array(down_sampled)
 
         return DataBuffer.create_input_output_dp(down_sampled, data)

@@ -4,7 +4,8 @@ from prepare_dataset.data_set_buffer import DataBuffer
 
 class BatchDataSetIterator:
 
-    def __init__(self, buffer: DataBuffer, batch_size):
+    def __init__(self, buffer: DataBuffer, batch_size,
+                 input_buffer_inst=None, output_buffer_inst=None):
 
         self.__batches_input = None
         self.__batches_output = None
@@ -13,12 +14,25 @@ class BatchDataSetIterator:
 
         self.__buffer = buffer
         self.__batch_counter = None
+
+        self.__input_buffer_inst = input_buffer_inst
+        self.__output_buffer_inst = output_buffer_inst
+
         self.reinitialize()
 
     def reinitialize(self):
 
-        self.__batches_input = []
-        self.__batches_output = []
+        if self.__input_buffer_inst is None:
+            self.__input_buffer_inst = []
+
+        if self.__output_buffer_inst is None:
+            self.__output_buffer_inst = []
+
+        self.__batches_input = self.__input_buffer_inst
+        self.__batches_output = self.__output_buffer_inst
+
+        self.__input_buffer_inst.clear()
+        self.__output_buffer_inst.clear()
 
         self.__buffer.initialize_get_random_unique()
 
@@ -26,15 +40,15 @@ class BatchDataSetIterator:
 
         count = 0
         unit_batch_input = []
-        unit_batch_output= []
+        unit_batch_output = []
         while unique_ele is not None:
-            unit_batch_input.append(unique_ele[DataBuffer.DpType.INPUT_DP])
-            unit_batch_output.append(unique_ele[DataBuffer.DpType.OUTPUT_DP])
+            unit_batch_input.append(unique_ele[0])
+            unit_batch_output.append(unique_ele[1])
             if count >= self.__batch_size:
                 self.__batches_input.append(unit_batch_input)
                 self.__batches_output.append(unit_batch_output)
                 unit_batch_input = []
-                unit_batch_output= []
+                unit_batch_output = []
                 count = 0
             unique_ele = self.__buffer.get_random_unique()
             count += 1

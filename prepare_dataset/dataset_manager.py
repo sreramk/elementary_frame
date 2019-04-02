@@ -1,5 +1,5 @@
 # Copyright (c) 2019 K Sreram, All rights reserved
-
+import h5py
 import os
 import random
 from enum import Enum
@@ -16,6 +16,10 @@ class DataSetManager:
     class DsType(Enum):
         TRAINING = "training"
         TESTING = "testing"
+
+    class H5PyDBPaths(Enum):
+        TRAIN_BUFFER = "train_buffer"
+        TEST_BUFFER = "test_buffer"
 
     @staticmethod
     def get_all_files_in_dir_list(dir_list, accepted_ext):
@@ -66,7 +70,7 @@ class DataSetManager:
 
     def __init__(self, train_ds_dir_list, test_ds_dir_list,
                  num_of_training_ds_to_load, num_of_testing_ds_to_load,
-                 accepted_ext):
+                 accepted_ext, hy5_group_inst=None):
 
         self.__train_ds_dir_list = train_ds_dir_list
         self.__test_ds_dir_list = test_ds_dir_list
@@ -83,6 +87,10 @@ class DataSetManager:
         self.__train_buffer = None
         self.__test_buffer = None
 
+        self.__train_buffer_db_inst = None
+        self.__test_buffer_db_inst = None
+
+        self.__h5py_group_inst = hy5_group_inst
         self.__initialize_dataset()
 
     def _reset_get(self):
@@ -109,8 +117,16 @@ class DataSetManager:
         raise MethodNotOverridden
 
     def __initialize_dataset(self):
-        self.__train_buffer = DataBuffer()
-        self.__test_buffer = DataBuffer()
+
+        if self.__h5py_group_inst is not None:
+            self.__h5py_group_inst: h5py.Group
+            self.__train_buffer_db_inst = \
+                self.__h5py_group_inst.require_group(DataSetManager.H5PyDBPaths.TRAIN_BUFFER)
+            self.__test_buffer_db_inst = \
+                self.__h5py_group_inst.require_group(DataSetManager.H5PyDBPaths.TEST_BUFFER)
+
+        self.__train_buffer = DataBuffer(rnd_dict_inst=self.__train_buffer_db_inst)
+        self.__test_buffer = DataBuffer(rnd_dict_inst=self.__test_buffer_db_inst)
         self._reset_get()
 
         try:

@@ -233,19 +233,13 @@ class SRModel(ModelBase):
     def __create_parameters(self):
 
         self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=[10, 10, 3, 32])))
-        self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=[8, 8, 32, 64])))
+        self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=[8, 8, 32, 32])))
+        self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=[1, 1, 32, 64])))
+        self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=[10, 10, 64, 3])))
 
-        self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=[4, 4, 64, 32])))
-        self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=[2, 2, 32, 64])))
-
-        self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=[6, 6, 64, 32])))
-        self.__filters.append(tf.Variable(initial_value=tf.truncated_normal(shape=[10, 10, 32, 3])))
-
+        self.__biases.append(tf.Variable(initial_value=tf.truncated_normal(shape=[32])))
         self.__biases.append(tf.Variable(initial_value=tf.truncated_normal(shape=[32])))
         self.__biases.append(tf.Variable(initial_value=tf.truncated_normal(shape=[64])))
-        self.__biases.append(tf.Variable(initial_value=tf.truncated_normal(shape=[32])))
-        self.__biases.append(tf.Variable(initial_value=tf.truncated_normal(shape=[64])))
-        self.__biases.append(tf.Variable(initial_value=tf.truncated_normal(shape=[32])))
         self.__biases.append(tf.Variable(initial_value=tf.truncated_normal(shape=[3])))
 
         self.__parameters = list(self.__filters)
@@ -253,14 +247,17 @@ class SRModel(ModelBase):
 
         return self.__filters, self.__biases, self.__parameters
 
-    def __create_model(self):
+    def __create_model(self, input_placeholder=None, modify_main_model_var=True):
+
+        if input_placeholder is None:
+            input_placeholder = self.__get_input_data_placeholder()
 
         if len(self.__filters) > 0 and len(self.__biases) > 0:
             variance_epsilon = tf.constant(0.00000001, shape=())
-            cur_layer1 = tf.nn.conv2d(input=self.__input_data, filter=self.__filters[0],
+            cur_layer1 = tf.nn.conv2d(input=input_placeholder, filter=self.__filters[0],
                                       strides=self.__strides, padding=self.__padding)
             cur_layer1 = tf.add(cur_layer1, self.__biases[0])
-            # cur_layer1 = tf.nn.relu(cur_layer1)
+            cur_layer1 = tf.nn.relu(cur_layer1)
             # mean, variance = tf.nn.moments(cur_layer1, axes=[0, 1, 2])
             # cur_layer1 = tf.nn.batch_normalization(cur_layer1, mean, variance, offset=None,
             #                                       scale=None, variance_epsilon=variance_epsilon)
@@ -268,7 +265,7 @@ class SRModel(ModelBase):
             cur_layer2 = tf.nn.conv2d(input=cur_layer1, filter=self.__filters[1],
                                       strides=self.__strides, padding=self.__padding)
             cur_layer2 = tf.add(cur_layer2, self.__biases[1])
-            # cur_layer2 = tf.nn.relu(cur_layer2)
+            cur_layer2 = tf.nn.relu(cur_layer2)
             # mean, variance = tf.nn.moments(cur_layer2, axes=[0, 1, 2])
             # cur_layer2 = tf.nn.batch_normalization(cur_layer2, mean, variance, offset=None,
             #                                       scale=None, variance_epsilon=variance_epsilon)
@@ -276,18 +273,20 @@ class SRModel(ModelBase):
             cur_layer3 = tf.nn.conv2d(input=cur_layer2, filter=self.__filters[2],
                                       strides=self.__strides, padding=self.__padding)
             cur_layer3 = tf.add(cur_layer3, self.__biases[2])
-            # cur_layer3 = tf.nn.relu(cur_layer3)
+            cur_layer3 = tf.nn.relu(cur_layer3)
             # mean, variance = tf.nn.moments(cur_layer3, axes=[0, 1, 2])
             # cur_layer3 = tf.nn.batch_normalization(cur_layer3, mean, variance, offset=None,
             #                                       scale=None, variance_epsilon=variance_epsilon)
 
-            cur_layer3 = tf.add(cur_layer1, cur_layer3)
+            # cur_layer3 = tf.add(cur_layer1, cur_layer3)
             # cur_layer3 = tf.divide(cur_layer3, 2.0)
 
             cur_layer4 = tf.nn.conv2d(input=cur_layer3, filter=self.__filters[3],
                                       strides=self.__strides, padding=self.__padding)
             cur_layer4 = tf.add(cur_layer4, self.__biases[3])
-            # cur_layer4 = tf.nn.relu(cur_layer4)
+            cur_layer4 = tf.nn.relu(cur_layer4)
+            cur_layer4 = tf.divide(cur_layer4, tf.reduce_max(cur_layer4))
+
             # mean, variance = tf.nn.moments(cur_layer4, axes=[0, 1, 2])
             # cur_layer4 = tf.nn.batch_normalization(cur_layer4, mean, variance, offset=None,
             #                                      scale=None, variance_epsilon=variance_epsilon)
@@ -295,26 +294,27 @@ class SRModel(ModelBase):
             # cur_layer4 = tf.divide(cur_layer4, 2.0)
             # cur_layer4 = tf.nn.relu(cur_layer4)
 
-            cur_layer5 = tf.nn.conv2d(input=cur_layer4, filter=self.__filters[4],
-                                      strides=self.__strides, padding=self.__padding)
-            cur_layer5 = tf.add(cur_layer5, self.__biases[4])
+            #cur_layer5 = tf.nn.conv2d(input=cur_layer4, filter=self.__filters[4],
+            #                          strides=self.__strides, padding=self.__padding)
+            #cur_layer5 = tf.add(cur_layer5, self.__biases[4])
             # cur_layer5 = tf.nn.relu(cur_layer5)
             # mean, variance = tf.nn.moments(cur_layer5, axes=[0, 1, 2])
             # cur_layer5 = tf.nn.batch_normalization(cur_layer5, mean, variance, offset=None,
             #                                       scale=None, variance_epsilon=variance_epsilon)
 
-            cur_layer5 = tf.add(cur_layer1, cur_layer5)
+            # cur_layer5 = tf.add(cur_layer1, cur_layer5)
 
-            cur_layer6 = tf.nn.conv2d(input=cur_layer5, filter=self.__filters[5],
-                                      strides=self.__strides, padding=self.__padding)
-            cur_layer6 = tf.add(cur_layer6, self.__biases[5])
-            cur_layer6 = tf.nn.relu(cur_layer6)
+            #cur_layer6 = tf.nn.conv2d(input=cur_layer5, filter=self.__filters[5],
+            #                          strides=self.__strides, padding=self.__padding)
+            #cur_layer6 = tf.add(cur_layer6, self.__biases[5])
+            #cur_layer6 = tf.nn.relu(cur_layer6)
 
-            cur_layer6 = tf.divide(cur_layer6, tf.reduce_max(cur_layer6))
+            #cur_layer6 = tf.divide(cur_layer6, tf.reduce_max(cur_layer6))
+            final_model = cur_layer4
+            if modify_main_model_var:
+                self.__model = final_model
 
-            self.__model = cur_layer6
-
-            return self.__model
+            return final_model
 
     def __create_triplet_loss(self):
         temp1 = tf.subtract(self.__input_data, self.__expected_output_data)
@@ -345,10 +345,10 @@ class SRModel(ModelBase):
                                                                   new_momentum})
 
     def __optimizer_to_use(self, loss_to_use):
-        return tf.train.MomentumOptimizer(learning_rate=self.__learning_rate, momentum=self.__momentum). \
-            minimize(loss=loss_to_use, var_list=self.__parameters)
-        # return tf.train.RMSPropOptimizer(learning_rate=self.__learning_rate). \
-        #    minimize(loss_to_use, var_list=self.__parameters)
+        #return tf.train.MomentumOptimizer(learning_rate=self.__learning_rate, momentum=self.__momentum). \
+        #    minimize(loss=loss_to_use, var_list=self.__parameters)
+        return tf.train.RMSPropOptimizer(learning_rate=self.__learning_rate). \
+            minimize(loss_to_use, var_list=self.__parameters)
 
     def __create_rms_triplet_loss(self):
         # forces the model to not learn the identity.
@@ -386,10 +386,10 @@ class SRModel(ModelBase):
         self.__psnr_loss = SRModel.__psnr_loss_compute(self.__expected_output_data, self.__model)
         self.__adam_psnr_loss = self.__optimizer_to_use(self.__psnr_loss)
 
-        x = tf.reduce_sum(self.__parameters[0])
-        for i in range(1, len(self.__parameters)):
-            x += tf.reduce_sum(self.__parameters[i] ** 2)
-        return self.__psnr_loss + x
+        #x = tf.reduce_sum(self.__parameters[0])
+        #for i in range(1, len(self.__parameters)):
+        #    x += tf.reduce_sum(self.__parameters[i] ** 2)
+        return self.__psnr_loss #+ x
 
     def __create_psnr_triplet_loss(self):
 
@@ -751,7 +751,7 @@ class SRModel(ModelBase):
             input_image = [input_image]
 
         sess = self.get_session()
-
+        # self.__model_saver_inst.load_checkpoint()
         img_result = sess.run(fetches=[self.get_model()],
                               feed_dict={self.__get_input_data_placeholder(): input_image})
 
@@ -771,6 +771,16 @@ class SRModel(ModelBase):
 
         return self.__parameters
 
+    def generate_tflite_file(self, filename, image_dim=(500, 500, 3)):
+
+        input_placeholder = tf.placeholder(dtype=tf.float32, shape=[None, image_dim[0], image_dim[1], image_dim[2]])
+        model = self.__create_model(input_placeholder, False)
+        sess = self.get_session()
+        converter = tf.contrib.lite.TFLiteConverter.from_session(sess, [input_placeholder],
+                                                         [model])
+        tflite_model = converter.convert()
+        open(filename, "wb").write(tflite_model)
+
 
 if __name__ == "__main__":
     def main_fnc():
@@ -785,12 +795,12 @@ if __name__ == "__main__":
 
         model_instance.set_model_saver_inst(modelsave)
 
-        # model_instance.prepare_train_test_dataset(
-        #    ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_train_HR/'],
-        #    ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/'],
-        #    num_of_training_ds_to_load=160, num_of_testing_ds_to_load=40,
-        #    train_batch_size=10, testing_dimension=(500, 500)
-        # )
+        model_instance.prepare_train_test_dataset(
+            ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_train_HR/'],
+            ['/media/sreramk/storage-main/elementary_frame/dataset/DIV2K_valid_HR/'],
+            num_of_training_ds_to_load=160, num_of_testing_ds_to_load=40,
+            train_batch_size=10, testing_dimension=(500, 500)
+         )
 
         model_instance.set_psnr_loss()
         # model_instance.run_test()
@@ -803,9 +813,13 @@ if __name__ == "__main__":
 
         modelsave.checkpoint_model_arguments(skip_duration=100)
         model_instance.set_learning_rate(0.1)
-        # model_instance.run_train(num_of_epochs=100)
+        model_instance.run_train(num_of_epochs=100)
         _, __, img = DataSetManager.random_crop_img(img, 250, 250)
         img = model_instance.zoom_image(img, 4, 4)
+
+        model_instance.generate_tflite_file\
+            ("/media/sreramk/storage-main/elementary_frame/deployment/model_deployment.tflite")
+
         for i in range(20):
             cv2.imshow("im1", img)
             # model_instance.display_image(img)

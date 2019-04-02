@@ -21,56 +21,6 @@ class ModelDerivedClassExceptions(TrainerException):
     pass
 
 
-class RunTrainerMustBeOverridden(ModelBaseExceptions):
-    """
-    run_trainer method isn't overridden.
-    """
-    pass
-
-
-class RunTestMustBeOverridden(ModelBaseExceptions):
-    """
-    run_test method isn't overridden.
-    """
-    pass
-
-
-class ExecuteModelMustBeOverridden(ModelBaseExceptions):
-    """
-    Execute model isn't overridden.
-    """
-    pass
-
-
-class GetModelMustBeOverridden(ModelBaseExceptions):
-    """
-    Get model, which must return the tensor operations for computing the result of the model must be overridden
-    """
-    pass
-
-
-class GetParameterTensorsMustBeOverridden(ModelBaseExceptions):
-    """
-    Get parameter tensors, which returns the parameters of the learning model, must be overridden.
-    """
-    pass
-
-
-class PrepareTrainTestDatasetMustBeOverridden(ModelBaseExceptions):
-    """
-    Prepare train test dataset- This must ensure that the training and the testing data-set are initialized and are
-    ready to be executed in both performing both the training and the testing process.
-    """
-    pass
-
-
-class SetModelSaverInstanceMustBeOverridden(ModelBaseExceptions):
-    """
-    Set Model Saver Instance- this must be overridden to accept the saver instance for the model.
-    """
-    pass
-
-
 class LossUninitialized(ModelDerivedClassExceptions):
     """
     This is raised when the loss function is uninitialized.
